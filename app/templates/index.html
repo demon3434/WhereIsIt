@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>找东西</title>
+  <link rel="icon" type="image/x-icon" href="/static/img/logo.ico?v=20260406b" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/img/logo-32.png?v=20260406b" />
+  <link rel="stylesheet" href="/static/css/style.css?v=20260412a" />
+</head>
+<body class="booting">
+  <div id="app">
+    <section id="authSection" class="card auth-card">
+      <div id="loginPage" class="auth-page">
+        <h2>登录</h2>
+        <form id="loginForm" class="panel">
+          <label>用户名<input required name="username" /></label>
+          <label>密码<input required type="password" name="password" /></label>
+          <div class="auth-actions login-actions">
+            <button type="submit">登录</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section id="mainSection" class="hidden">
+      <div class="tabs">
+        <div class="tabs-left">
+          <a class="brand-tab" href="/items">
+            <img src="/static/img/logo-64.png?v=20260406b" alt="找东西 Logo" />
+            <span>找东西</span>
+          </a>
+          <span class="brand-sep">|</span>
+          <a class="tab" data-tab="items" href="/items">物品管理</a>
+          <a class="tab" data-tab="locations" href="/locations">位置管理</a>
+          <a class="tab" data-tab="categories" href="/categories">分类管理</a>
+          <a class="tab" data-tab="tags" href="/tags">标签管理</a>
+          <a class="tab" data-tab="users" href="/users">用户管理</a>
+        </div>
+
+        <div class="tabs-right">
+          <div id="userMenuWrap" class="user-menu-wrap hidden">
+            <button id="currentUserBtn" type="button" class="user-menu-trigger">
+              <span id="currentUser">用户</span>
+              <span class="caret" aria-hidden="true">▼</span>
+            </button>
+            <div id="userMenu" class="user-menu hidden">
+              <a id="goProfileBtn" href="/profile" class="user-menu-item">个人信息</a>
+              <button id="logoutBtn" type="button" class="user-menu-item danger">退出登录</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div id="itemsTab" class="tab-panel">
+        <div class="item-subtabs">
+          <button type="button" class="item-subtab active" data-item-tab="create">新增物品</button>
+          <button type="button" class="item-subtab" data-item-tab="list">物品列表</button>
+        </div>
+
+        <div id="itemCreatePanel">
+          <div class="card">
+            <form id="itemForm" class="item-create-form">
+              <input type="hidden" name="id" />
+
+              <div class="item-create-row item-create-row-4">
+                <label class="item-field"><span class="field-title">名称<span class="req">*</span></span><input required name="name" /></label>
+                <label class="item-field"><span class="field-title">品牌</span><input name="brand" /></label>
+                <label class="item-field"><span class="field-title">数量<span class="req">*</span></span><input type="number" min="1" step="1" required name="quantity" value="1" /></label>
+                <label class="item-field"><span class="field-title">分类<span class="req">*</span></span><select required name="category_id" id="itemCategory"></select></label>
+              </div>
+
+              <div class="item-create-row item-create-row-4">
+                <label class="item-field"><span class="field-title">房屋<span class="req">*</span></span><select required name="house_id" id="itemHouse"></select></label>
+                <label class="item-field"><span class="field-title">房间<span class="req">*</span></span><select required name="room_id" id="itemRoom"></select></label>
+                <label class="item-field item-field-3x"><span class="field-title">具体位置<span class="req">*</span></span><input required name="location_detail" /></label>
+              </div>
+
+              <div class="item-create-row item-tag-row">
+                <label class="item-field"><span class="field-title">标签</span>
+                  <input id="itemTagInput" list="itemTagOptions" placeholder="输入标签后回车" />
+                  <datalist id="itemTagOptions"></datalist>
+                </label>
+                <div id="itemTagChips" class="tag-chip-wrap item-tag-inline"></div>
+                <label class="hidden">标签隐藏<select name="tag_ids" id="itemTags" multiple></select></label>
+              </div>
+
+              <div class="item-create-row">
+                <label class="item-field">图片（最多上传 9 张）
+                  <input type="file" id="itemFiles" name="files" accept="image/*,.jpg,.jpeg,.png" multiple />
+                </label>
+              </div>
+
+              <div id="selectedFilesCount" class="file-count">已选 0 张新图片</div>
+              <div id="pendingImagePreview" class="image-grid"></div>
+              <div id="editImages" class="image-row"></div>
+
+              <div class="item-create-actions">
+                <button type="submit">新增物品</button>
+                <button type="button" id="cancelEditBtn" class="ghost hidden">取消编辑</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div id="itemListPanel" class="hidden">
+          <div class="card item-list-filter-bar">
+            <label class="item-field">关键字<input id="searchQ" placeholder="名称或品牌" /></label>
+            <label class="item-field">房屋<select id="searchHouse"></select></label>
+            <label class="item-field">房间<select id="searchRoom"></select></label>
+            <label class="item-field">分类<select id="searchCategory"></select></label>
+            <label class="item-field">标签
+              <input id="searchTagKeyword" list="searchTagOptions" placeholder="输入标签关键字" />
+              <datalist id="searchTagOptions"></datalist>
+            </label>
+            <button id="searchBtn">筛选</button>
+            <button id="resetSearchBtn" class="ghost">清空筛选</button>
+          </div>
+
+          <div class="card">
+            <div id="itemsContainer"></div>
+            <div id="itemsPagination" class="table-pagination"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="locationsTab" class="tab-panel hidden">
+        <div class="location-subtabs">
+          <button type="button" class="location-subtab active" data-loc-tab="house">房屋管理</button>
+          <button type="button" class="location-subtab" data-loc-tab="room">房间管理</button>
+        </div>
+
+        <div id="locationHousePanel">
+          <div class="card">
+            <h2>新增房屋</h2>
+            <form id="houseForm" class="category-create-form house-create-form">
+              <input type="hidden" name="id" />
+              <label>序号<input type="number" min="0" name="sort_order" value="0" /></label>
+              <label>房屋名称<input required name="name" /></label>
+              <button type="submit">新增房屋</button>
+              <button type="button" id="cancelHouseEditBtn" class="ghost hidden">取消</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h2>房屋列表</h2>
+            <div class="category-filter-row house-filter-row">
+              <div class="category-filter-group">
+                <span class="category-filter-title">按关键字筛选</span>
+                <input id="houseKeyword" class="category-filter-input" placeholder="输入房屋名称关键字" />
+              </div>
+              <div class="category-filter-group category-filter-group-status">
+                <span class="category-filter-title">按状态筛选</span>
+                <select id="houseStatus" class="category-filter-select">
+                  <option value="">全部状态</option>
+                  <option value="enabled">启用</option>
+                  <option value="disabled">停用</option>
+                </select>
+              </div>
+              <button type="button" id="houseClearBtn" class="ghost category-clear-btn">清空筛选</button>
+            </div>
+            <div id="housesContainer"></div>
+            <div id="housesPagination" class="table-pagination"></div>
+          </div>
+        </div>
+
+        <div id="locationRoomPanel" class="hidden">
+          <div class="card">
+            <h2>新增房间</h2>
+            <form id="roomForm" class="category-create-form room-create-form">
+              <input type="hidden" name="id" />
+              <label>所属房屋<select id="roomHouse" name="house_id" required></select></label>
+              <label>房屋内序号<input type="number" min="0" name="sort_order" value="0" /></label>
+              <label>房间名称<input required name="name" /></label>
+              <button type="submit">新增房间</button>
+              <button type="button" id="cancelRoomEditBtn" class="ghost hidden">取消编辑</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h2>房间列表</h2>
+            <div id="roomsTreeContainer"></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="categoriesTab" class="tab-panel hidden">
+        <div class="card">
+          <h2>新增分类</h2>
+          <form id="categoryForm" class="category-create-form">
+            <label>序号<input type="number" min="0" name="sort_order" value="0" /></label>
+            <label>分类名称<input required name="name" /></label>
+            <button type="submit">新增分类</button>
+            <button type="button" id="cancelCategoryEditBtn" class="ghost hidden">取消</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>分类列表</h2>
+          <div class="category-filter-row">
+            <div class="category-filter-group">
+              <span class="category-filter-title">按关键字筛选</span>
+              <input id="categoryKeyword" class="category-filter-input" placeholder="输入分类名称关键字" />
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按状态筛选</span>
+              <select id="categoryStatus" class="category-filter-select">
+                <option value="">全部状态</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+            <button type="button" id="categoryClearBtn" class="ghost category-clear-btn">清空筛选</button>
+          </div>
+          <div id="categoriesContainer"></div>
+          <div id="categoriesPagination" class="table-pagination"></div>
+        </div>
+      </div>
+
+      <div id="tagsTab" class="tab-panel hidden">
+        <div class="card">
+          <h2>新增标签</h2>
+          <form id="tagForm" class="category-create-form">
+            <label>标签名称<input required name="name" /></label>
+            <button type="submit">新增标签</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>标签列表</h2>
+          <div class="category-filter-row">
+            <div class="category-filter-group">
+              <span class="category-filter-title">按关键字筛选</span>
+              <input id="tagKeyword" class="category-filter-input" placeholder="输入标签名称关键字" />
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按状态筛选</span>
+              <select id="tagStatus" class="category-filter-select">
+                <option value="">全部状态</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+            <button type="button" id="tagClearBtn" class="ghost category-clear-btn">清空筛选</button>
+          </div>
+          <div id="tagsContainer"></div>
+          <div id="tagsPagination" class="table-pagination"></div>
+        </div>
+      </div>
+
+      <div id="profileTab" class="tab-panel hidden">
+        <div class="card">
+          <h2>个人信息</h2>
+          <form id="profileForm">
+            <label>昵称<input name="nickname" /></label>
+            <label>姓名<input name="full_name" /></label>
+            <label>默认房屋<select id="profileDefaultHouse" name="default_house_id"></select></label>
+            <label>新密码（可选）<input type="password" name="password" minlength="6" /></label>
+            <button type="submit">保存个人信息</button>
+          </form>
+        </div>
+      </div>
+
+      <div id="usersTab" class="tab-panel hidden">
+        <div class="card">
+          <h2>新增用户 <span class="user-hint">初始密码为 <code>123456</code></span></h2>
+          <form id="adminUserForm" class="category-create-form user-create-form">
+            <label>登录账号<input name="username" required /></label>
+            <label>姓名<input name="full_name" /></label>
+            <label>角色
+              <select name="role">
+                <option value="user">普通用户</option>
+                <option value="admin">管理员</option>
+              </select>
+            </label>
+            <label class="available-house-field">可用房屋
+              <select id="adminAvailableHouses" name="available_house_ids" multiple class="hidden"></select>
+              <div id="adminAvailableHousePicker" class="multi-picker">
+                <button type="button" id="adminAvailableHouseToggle" class="multi-picker-toggle">
+                  <span id="adminAvailableSummary">请选择可用房屋</span>
+                  <span class="caret">▾</span>
+                </button>
+                <div id="adminAvailableHousePanel" class="multi-picker-panel">
+                  <label class="picker-option picker-option-all"><input type="checkbox" id="adminAvailableAll" />全选</label>
+                  <div id="adminAvailableList" class="multi-picker-list"></div>
+                </div>
+                <div id="adminAvailableChips" class="picker-chip-wrap"></div>
+              </div>
+            </label>
+            <label>默认房屋<select id="adminDefaultHouse" name="default_house_id"></select></label>
+            <button type="submit">新增用户</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>用户列表</h2>
+          <div class="category-filter-row user-filter-row">
+            <div class="category-filter-group">
+              <span class="category-filter-title">按关键字筛选</span>
+              <input id="userKeyword" class="category-filter-input" placeholder="账号/姓名" />
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按状态筛选</span>
+              <select id="userStatus" class="category-filter-select">
+                <option value="">全部状态</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按角色筛选</span>
+              <select id="userRole" class="category-filter-select">
+                <option value="">全部角色</option>
+                <option value="admin">管理员</option>
+                <option value="user">普通用户</option>
+              </select>
+            </div>
+            <button type="button" id="userClearBtn" class="ghost category-clear-btn">清空筛选</button>
+          </div>
+          <div id="adminUsersContainer"></div>
+          <div id="adminUsersPagination" class="table-pagination"></div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <dialog id="imageDialog">
+    <img id="dialogImg" alt="图片预览" />
+    <button id="closeDialogBtn">关闭</button>
+  </dialog>
+
+  <dialog id="confirmDialog" class="confirm-dialog">
+    <div class="confirm-box">
+      <h3 id="confirmTitle">确认操作</h3>
+      <p id="confirmSummary">请确认是否继续执行当前操作。</p>
+      <div id="confirmDetails" class="confirm-details"></div>
+      <div class="confirm-actions">
+        <button id="confirmCancelBtn" type="button" class="ghost">取消</button>
+        <button id="confirmOkBtn" type="button" class="danger">确认</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="itemDetailDialog" class="confirm-dialog">
+    <div class="confirm-box item-dialog-box">
+      <h3>物品详情</h3>
+      <div id="itemDetailContent" class="confirm-details"></div>
+      <div class="confirm-actions">
+        <button id="itemDetailCloseBtn" type="button" class="ghost">关闭</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="itemPhotosDialog" class="confirm-dialog">
+    <div class="confirm-box item-dialog-box">
+      <h3>物品照片</h3>
+      <div id="itemPhotosContent" class="image-grid"></div>
+      <div class="confirm-actions">
+        <button id="itemPhotosCloseBtn" type="button" class="ghost">关闭</button>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog id="itemEditDialog" class="confirm-dialog">
+    <div class="confirm-box item-edit-dialog-box">
+      <h3>编辑物品</h3>
+      <form id="itemEditForm" class="item-create-form">
+        <input type="hidden" name="id" />
+
+        <div class="item-create-row item-create-row-4">
+          <label class="item-field"><span class="field-title">名称<span class="req">*</span></span><input required name="name" /></label>
+          <label class="item-field"><span class="field-title">品牌</span><input name="brand" /></label>
+          <label class="item-field"><span class="field-title">数量<span class="req">*</span></span><input type="number" min="1" step="1" required name="quantity" value="1" /></label>
+          <label class="item-field"><span class="field-title">分类<span class="req">*</span></span><select required name="category_id" id="itemEditCategory"></select></label>
+        </div>
+
+        <div class="item-create-row item-create-row-4">
+          <label class="item-field"><span class="field-title">房屋<span class="req">*</span></span><select required name="house_id" id="itemEditHouse"></select></label>
+          <label class="item-field"><span class="field-title">房间<span class="req">*</span></span><select required name="room_id" id="itemEditRoom"></select></label>
+          <label class="item-field item-field-3x"><span class="field-title">具体位置<span class="req">*</span></span><input required name="location_detail" /></label>
+        </div>
+
+        <div class="item-create-row item-tag-row">
+          <label class="item-field"><span class="field-title">标签</span>
+            <input id="itemEditTagInput" list="itemEditTagOptions" placeholder="输入标签后回车" />
+            <datalist id="itemEditTagOptions"></datalist>
+          </label>
+          <div id="itemEditTagChips" class="tag-chip-wrap item-tag-inline"></div>
+        </div>
+
+        <div class="item-create-row">
+          <label class="item-field">新增图片（可选）
+            <input type="file" id="itemEditFiles" name="files" accept="image/*,.jpg,.jpeg,.png" multiple />
+          </label>
+        </div>
+        <div id="itemEditFilesCount" class="file-count">已选 0 张新图片</div>
+        <div id="itemEditPendingPreview" class="image-grid"></div>
+        <div id="itemEditCurrentImages" class="image-row"></div>
+
+        <div class="confirm-actions">
+          <button id="itemEditCancelBtn" type="button" class="ghost">取消</button>
+          <button id="itemEditSaveBtn" type="submit">保存</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog id="imagePreviewDialog" class="image-preview-dialog">
+    <div class="image-preview-shell">
+      <div class="image-preview-toolbar">
+        <div class="image-preview-tools">
+          <button type="button" id="imageZoomOutBtn" class="image-tool-btn image-tool-icon" title="缩小" aria-label="缩小">🔍−</button>
+          <button type="button" id="imageZoomResetBtn" class="image-tool-btn image-tool-icon" title="恢复" aria-label="恢复">↺</button>
+          <button type="button" id="imageZoomInBtn" class="image-tool-btn image-tool-icon" title="放大" aria-label="放大">🔍＋</button>
+        </div>
+        <div id="imagePreviewTitle" class="image-preview-title">图片预览</div>
+        <button type="button" id="imagePreviewCloseBtn" class="image-close-btn" aria-label="关闭">✕</button>
+      </div>
+      <div id="imagePreviewStage" class="image-preview-stage">
+        <img id="imagePreviewImg" alt="图片预览" />
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    (function () {
+      const loginForm = document.getElementById("loginForm");
+      const tokenKey = "whereisit_token";
+
+      if (!loginForm) return;
+
+      loginForm.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const fd = new FormData(loginForm);
+        const username = String(fd.get("username") || "").trim();
+        const password = String(fd.get("password") || "");
+        try {
+          const res = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username, password }),
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.detail || "登录失败");
+          localStorage.setItem(tokenKey, data.access_token || "");
+          location.href = "/items";
+        } catch (err) {
+          alert(err.message || "登录失败");
+        }
+      });
+    })();
+  </script>
+
+  <script>
+    window.addEventListener("error", function () {
+      document.body.classList.remove("booting");
+    });
+    window.addEventListener("unhandledrejection", function () {
+      document.body.classList.remove("booting");
+    });
+    setTimeout(function () {
+      document.body.classList.remove("booting");
+    }, 1200);
+  </script>
+  <script src="/static/js/app.js?v=20260412d"></script>
+</body>
+</html>

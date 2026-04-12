@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>权限不足</title>
+  <style>
+    :root { color-scheme: light; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #f8fafc;
+      font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    }
+    .notice {
+      max-width: 520px;
+      background: #fff1f2;
+      color: #9f1239;
+      border: 1px solid #fda4af;
+      border-radius: 12px;
+      padding: 18px 22px;
+      line-height: 1.6;
+      box-shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+    }
+    .title {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+    .desc {
+      margin: 0;
+      font-size: 16px;
+    }
+    .actions {
+      margin-top: 14px;
+      display: flex;
+      gap: 10px;
+    }
+    .btn {
+      display: inline-block;
+      text-decoration: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 14px;
+      border: 1px solid #e2e8f0;
+      color: #1e293b;
+      background: #fff;
+    }
+    .btn-primary {
+      background: #2563eb;
+      color: #fff;
+      border-color: #2563eb;
+    }
+  </style>
+</head>
+<body>
+  <section class="notice">
+    <h1 class="title">权限不足</h1>
+    <p class="desc">你当前角色无权访问该页面。</p>
+    <div class="actions">
+      <a class="btn btn-primary" href="/items">返回物品管理</a>
+      <a class="btn" href="/login">重新登录</a>
+    </div>
+  </section>
+</body>
+</html>
