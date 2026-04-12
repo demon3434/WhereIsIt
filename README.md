@@ -32,20 +32,27 @@
 ├─ docs/
 │  └─ 数据字典.md
 ├─ docker-compose.yml
+├─ docker-compose(self-build).yml
 ├─ Dockerfile
 └─ .env
 ```
 
-## 4. 快速部署
+## 4. 部署（新手必读）
+
+本项目提供两种部署方式，请先选一种：
+
+1. 使用已发布镜像部署（推荐，最快）
+2. 用本地代码构建镜像后部署（用于你要改代码的场景）
 
 ### 4.1 前置条件
 
-- 已安装 Docker / Docker Compose
-- Linux 服务器或支持 Docker 的环境
+- 已安装 Docker Engine 与 Docker Compose（`docker compose version` 可用）
+- 服务器可联网拉取镜像
+- 你有一个工作目录（例如 `/opt/docker/whereisit`）
 
-### 4.2 配置环境变量
+### 4.2 准备环境变量 `.env`
 
-编辑 `.env`（仓库已提供示例，按需调整）：
+在部署目录创建或编辑 `.env`（仓库内已有示例，可直接复制后改值）：
 
 ```env
 APP_NAME=WhereIsIt
@@ -63,17 +70,82 @@ DEFAULT_ADMIN_USERNAME=admin
 DEFAULT_ADMIN_PASSWORD=123456
 DEFAULT_ADMIN_NICKNAME=管理员
 SYNC_DEFAULT_ADMIN_PASSWORD=true
-WEB_PORT=4000
+WEB_PORT=3000
 ```
 
-### 4.3 启动
+### 4.3 方式 A：使用 DockerHub 镜像部署（推荐）
+
+`docker-compose.yml` 默认使用镜像：`demon3434/where_is_it:latest`。
+
+适合人群：
+- 不改代码，只想快速部署
+- 想和 DockerHub 最新镜像保持一致
+
+操作步骤：
+
+1. 进入部署目录（目录中应有 `docker-compose.yml` 和 `.env`）
+2. 拉取并启动容器
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 docker compose ps
 ```
 
-访问：`http://<服务器IP>:<WEB_PORT>`（默认 `4000`）
+3. 打开健康检查确认服务正常
+
+```bash
+# 在宿主机上运行
+curl http://127.0.0.1:${WEB_PORT}/api/health
+```
+
+如果返回 `{"status":"ok"}`，说明部署成功。
+
+### 4.4 方式 B：用本地代码构建镜像部署
+
+`docker-compose(self-build).yml` 是“根据当前目录代码构建并运行”的 Compose 文件，不依赖 DockerHub 的应用镜像。
+
+适合人群：
+- 你改了代码，想直接在本机/服务器用当前代码运行
+- 你不想依赖外网拉取应用镜像
+
+操作步骤：
+
+```bash
+docker compose -f 'docker-compose(self-build).yml' up -d --build
+docker compose -f 'docker-compose(self-build).yml' ps
+```
+
+### 4.5 两个 Compose 文件的区别（重要）
+
+- `docker-compose.yml`
+  - 使用远程镜像 `demon3434/where_is_it:latest`
+  - 启动快，适合生产部署和新手
+
+- `docker-compose(self-build).yml`
+  - 使用本地代码 `build` 镜像
+  - 适合开发、测试、改代码后验证
+
+建议：
+- 生产环境优先用 `docker-compose.yml`
+- 开发调试优先用 `docker-compose(self-build).yml`
+
+### 4.6 直接用 `docker run` 运行镜像（可选）
+
+如果你不想用 Compose，也可以直接运行：
+
+1. 用 `.env` 传参：
+
+```bash
+docker run -d --name whereisit-app --env-file .env -p 3000:3000 demon3434/where_is_it:latest
+```
+
+2. 或在命令行覆盖单个参数（优先级高于 `--env-file`）：
+
+```bash
+# 以修改 ACCESS_TOKEN_EXPIRE_MINUTES 参数为例
+docker run -d --name whereisit-app --env-file .env -e ACCESS_TOKEN_EXPIRE_MINUTES=525600 -p 3000:3000 demon3434/where_is_it:latest
+```
 
 ## 5. 关键可配置参数说明
 
@@ -92,7 +164,7 @@ docker compose ps
 
 ## 6. docker-compose 说明
 
-`docker-compose.yml` 中包含两个服务：
+默认包含两个服务：
 
 1. `db`（PostgreSQL）
 2. `app`（FastAPI）

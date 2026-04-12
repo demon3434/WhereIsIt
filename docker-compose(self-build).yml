@@ -16,8 +16,9 @@ services:
       retries: 20
 
   app:
-    image: demon3434/where_is_it:latest
-    pull_policy: always
+    build:
+      context: ./
+      dockerfile: Dockerfile
     container_name: whereisit-app
     restart: unless-stopped
     env_file:
