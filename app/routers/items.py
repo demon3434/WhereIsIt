@@ -1,16 +1,17 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
-from sqlalchemy import Select, select
+from sqlalchemy import Select, asc, desc, func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from ..config import settings
 from ..database import get_db
 from ..deps import get_current_user
-from ..models import Category, House, Item, ItemImage, Location, OperationLog, Tag, User
-from ..schemas import ItemIn, ItemOut, MessageOut
+from ..models import Category, House, Item, ItemImage, Location, OperationLog, Tag, User, item_tags
+from ..schemas import ItemIn, ItemOut, MessageOut, PaginatedItemsOut
 from ..services.storage import save_upload_file
 
 router = APIRouter(prefix="/api/items", tags=["物品"])
@@ -126,29 +127,89 @@ def query_base(current_user: User) -> Select[tuple[Item]]:
     ).order_by(Item.updated_at.desc())
 
 
-@router.get("", response_model=list[ItemOut])
+@router.get("", response_model=PaginatedItemsOut)
 def list_items(
     q: str | None = None,
     category_id: int | None = None,
     house_id: int | None = None,
     room_id: int | None = None,
     tag_id: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
+    sort_key: Literal["id", "name", "house_room", "category", "tags", "updated_at"] = "updated_at",
+    sort_order: Literal["asc", "desc"] = "desc",
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    stmt = query_base(current_user)
+    safe_page = max(1, page)
+    safe_page_size = min(max(1, page_size), 100)
+    offset = (safe_page - 1) * safe_page_size
+
+    stmt = select(Item.id)
     if q:
-        stmt = stmt.where(Item.name.ilike(f"%{q}%") | Item.brand.ilike(f"%{q}%"))
+        stmt = stmt.where(or_(Item.name.ilike(f"%{q}%"), Item.brand.ilike(f"%{q}%")))
+    if current_user.role != "admin":
+        stmt = stmt.where(Item.user_id == current_user.id)
     if category_id:
         stmt = stmt.where(Item.category_id == category_id)
     if room_id:
         stmt = stmt.where(Item.location_id == room_id)
+
+    joined_location = False
+    joined_category = False
     if house_id:
         stmt = stmt.join(Item.location).where(Location.house_id == house_id)
+        joined_location = True
     if tag_id:
         stmt = stmt.join(Item.tags).where(Tag.id == tag_id)
-    items = list(db.scalars(stmt).unique())
-    return [item_to_out(item) for item in items]
+
+    if sort_key == "name":
+        sort_expr = func.lower(func.coalesce(Item.name, ""))
+    elif sort_key == "house_room":
+        if not joined_location:
+            stmt = stmt.outerjoin(Item.location)
+            joined_location = True
+        sort_expr = func.lower(func.coalesce(Location.path, ""))
+    elif sort_key == "category":
+        if not joined_category:
+            stmt = stmt.outerjoin(Item.category)
+            joined_category = True
+        sort_expr = func.lower(func.coalesce(Category.name, ""))
+    elif sort_key == "tags":
+        min_tag_name = (
+            select(func.min(func.lower(Tag.name)))
+            .select_from(item_tags.join(Tag, item_tags.c.tag_id == Tag.id))
+            .where(item_tags.c.item_id == Item.id)
+            .scalar_subquery()
+        )
+        sort_expr = func.coalesce(min_tag_name, "")
+    elif sort_key == "id":
+        sort_expr = Item.id
+    else:
+        sort_expr = Item.updated_at
+
+    order_fn = asc if sort_order == "asc" else desc
+    stmt = stmt.order_by(order_fn(sort_expr), order_fn(Item.id))
+
+    total_stmt = select(func.count()).select_from(stmt.order_by(None).subquery())
+    total = db.scalar(total_stmt) or 0
+
+    item_ids = list(db.scalars(stmt.offset(offset).limit(safe_page_size)))
+    if not item_ids:
+        total_pages = (total + safe_page_size - 1) // safe_page_size if total else 0
+        return PaginatedItemsOut(items=[], total=total, page=safe_page, page_size=safe_page_size, total_pages=total_pages)
+
+    loaded_items = list(db.scalars(query_base(current_user).where(Item.id.in_(item_ids))).unique())
+    item_by_id = {item.id: item for item in loaded_items}
+    ordered_items = [item_to_out(item_by_id[item_id]) for item_id in item_ids if item_id in item_by_id]
+    total_pages = (total + safe_page_size - 1) // safe_page_size if total else 0
+    return PaginatedItemsOut(
+        items=ordered_items,
+        total=total,
+        page=safe_page,
+        page_size=safe_page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.post("", response_model=ItemOut)

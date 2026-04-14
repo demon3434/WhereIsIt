@@ -10,6 +10,13 @@ from ..config import settings
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png"}
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+MAX_UPLOAD_IMAGE_BYTES = 900 * 1024
+SPEC_MAX_LONG_EDGE = 1600
+SPEC_JPEG_QUALITY = 82
+MIN_JPEG_QUALITY = 56
+MIN_LONG_EDGE = 720
+QUALITY_STEP = 8
+SCALE_STEP = 0.85
 
 
 def ensure_upload_dir() -> None:
@@ -46,26 +53,55 @@ def save_upload_file(file: UploadFile, user_id: int, item_id: int) -> tuple[str,
 
 
 def compress_image(raw: bytes) -> bytes:
-    limit = 800 * 1024
     image = Image.open(BytesIO(raw))
-    if image.mode not in ("RGB", "L"):
+    image.load()
+
+    if image.mode in ("RGBA", "LA") or ("transparency" in image.info):
+        rgba = image.convert("RGBA")
+        white_bg = Image.new("RGB", image.size, (255, 255, 255))
+        white_bg.paste(rgba, mask=rgba.split()[-1])
+        image = white_bg
+    elif image.mode != "RGB":
         image = image.convert("RGB")
-    if image.mode == "L":
-        image = image.convert("RGB")
-    for quality in [85, 75, 65, 55, 45, 35]:
+
+    width, height = image.size
+    long_edge = max(width, height)
+    if long_edge > SPEC_MAX_LONG_EDGE:
+        ratio = SPEC_MAX_LONG_EDGE / long_edge
+        image = image.resize((max(1, int(width * ratio)), max(1, int(height * ratio))), Image.Resampling.LANCZOS)
+
+    current = image
+    quality = SPEC_JPEG_QUALITY
+    result = b""
+
+    # Always execute compression flow even when source dimensions are already under limits.
+    while True:
         buffer = BytesIO()
-        image.save(buffer, format="JPEG", optimize=True, quality=quality)
-        data = buffer.getvalue()
-        if len(data) <= limit:
-            return data
-    # Still too large, downscale progressively.
-    work = image
-    for _ in range(4):
-        width, height = work.size
-        work = work.resize((max(1, int(width * 0.8)), max(1, int(height * 0.8))))
-        buffer = BytesIO()
-        work.save(buffer, format="JPEG", optimize=True, quality=40)
-        data = buffer.getvalue()
-        if len(data) <= limit:
-            return data
-    return data
+        current.save(buffer, format="JPEG", optimize=True, quality=quality)
+        result = buffer.getvalue()
+        if len(result) <= MAX_UPLOAD_IMAGE_BYTES:
+            return result
+
+        if quality > MIN_JPEG_QUALITY:
+            quality = max(MIN_JPEG_QUALITY, quality - QUALITY_STEP)
+            continue
+
+        current_long_edge = max(current.size)
+        if current_long_edge <= MIN_LONG_EDGE:
+            break
+
+        next_long_edge = max(MIN_LONG_EDGE, int(current_long_edge * SCALE_STEP))
+        if next_long_edge >= current_long_edge:
+            break
+
+        resize_ratio = next_long_edge / current_long_edge
+        current = current.resize(
+            (
+                max(1, int(current.size[0] * resize_ratio)),
+                max(1, int(current.size[1] * resize_ratio)),
+            ),
+            Image.Resampling.LANCZOS,
+        )
+        quality = SPEC_JPEG_QUALITY
+
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片压缩后仍超过 900KB，请更换图片")

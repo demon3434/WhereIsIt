@@ -139,6 +139,14 @@ class ItemOut(BaseModel):
     updated_at: datetime
 
 
+class PaginatedItemsOut(BaseModel):
+    items: list[ItemOut]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+
+
 class AdminUserIn(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     full_name: str = Field(default="", max_length=50)

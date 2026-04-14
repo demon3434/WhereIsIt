@@ -15,6 +15,8 @@ const state = {
   itemTagKeyword: "",
   itemPage: 1,
   itemPageSize: 20,
+  itemTotal: 0,
+  itemTotalPages: 0,
   itemSortKey: "updated_at",
   itemSortOrder: "desc",
   users: [],
@@ -85,9 +87,129 @@ const confirmCancelBtn = byId("confirmCancelBtn");
 const confirmOkBtn = byId("confirmOkBtn");
 
 let previewScale = 1;
+const MAX_IMAGES_PER_ITEM = 9;
+const UPLOAD_IMAGE_MAX_BYTES = 900 * 1024;
+const UPLOAD_IMAGE_MAX_LONG_EDGE = 1600;
+const UPLOAD_IMAGE_MIN_LONG_EDGE = 720;
+const UPLOAD_IMAGE_INITIAL_QUALITY = 0.82;
+const UPLOAD_IMAGE_MIN_QUALITY = 0.56;
+const UPLOAD_IMAGE_QUALITY_STEP = 0.08;
+const UPLOAD_IMAGE_SCALE_STEP = 0.85;
 
 function toast(msg) {
   window.alert(msg);
+}
+
+function clampUploadQuality(value) {
+  return Math.max(0, Math.min(1, Number(value) || 0));
+}
+
+function toUploadJpegName(name = "upload") {
+  const base = String(name || "upload")
+    .replace(/\.[^.]+$/, "")
+    .replace(/[^\w.-]+/g, "_");
+  return `${base || "upload"}.jpg`;
+}
+
+function scaleByLongEdge(width, height, targetLongEdge) {
+  const safeW = Math.max(1, Math.round(width || 1));
+  const safeH = Math.max(1, Math.round(height || 1));
+  const longEdge = Math.max(safeW, safeH);
+  if (longEdge <= targetLongEdge) return { width: safeW, height: safeH };
+  const ratio = targetLongEdge / longEdge;
+  return {
+    width: Math.max(1, Math.round(safeW * ratio)),
+    height: Math.max(1, Math.round(safeH * ratio)),
+  };
+}
+
+function loadImageElement(file) {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+    image.onload = () => resolve({ image, cleanup: () => URL.revokeObjectURL(objectUrl) });
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error(`图片“${file.name || "未命名"}”读取失败`));
+    };
+    image.src = objectUrl;
+  });
+}
+
+function drawImageToCanvas(image, width, height) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("浏览器不支持 Canvas 2D");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(image, 0, 0, width, height);
+  return canvas;
+}
+
+function canvasToJpegBlob(canvas, quality) {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (blob) resolve(blob);
+        else reject(new Error("图片编码失败"));
+      },
+      "image/jpeg",
+      clampUploadQuality(quality)
+    );
+  });
+}
+
+async function compressImageForUpload(file) {
+  if (!file || !String(file.type || "").startsWith("image/")) {
+    throw new Error(`文件“${file?.name || "未命名"}”不是图片`);
+  }
+
+  const { image, cleanup } = await loadImageElement(file);
+  try {
+    const sourceWidth = image.naturalWidth || image.width || 1;
+    const sourceHeight = image.naturalHeight || image.height || 1;
+    let size = scaleByLongEdge(sourceWidth, sourceHeight, UPLOAD_IMAGE_MAX_LONG_EDGE);
+    let longEdge = Math.max(size.width, size.height);
+    let quality = UPLOAD_IMAGE_INITIAL_QUALITY;
+    let canvas = drawImageToCanvas(image, size.width, size.height);
+
+    while (true) {
+      const blob = await canvasToJpegBlob(canvas, quality);
+      if (blob.size <= UPLOAD_IMAGE_MAX_BYTES) {
+        return new File([blob], toUploadJpegName(file.name), {
+          type: "image/jpeg",
+          lastModified: Date.now(),
+        });
+      }
+      if (quality > UPLOAD_IMAGE_MIN_QUALITY + 1e-6) {
+        quality = Math.max(UPLOAD_IMAGE_MIN_QUALITY, quality - UPLOAD_IMAGE_QUALITY_STEP);
+        continue;
+      }
+      if (longEdge <= UPLOAD_IMAGE_MIN_LONG_EDGE) break;
+
+      const nextLongEdge = Math.max(UPLOAD_IMAGE_MIN_LONG_EDGE, Math.floor(longEdge * UPLOAD_IMAGE_SCALE_STEP));
+      if (nextLongEdge >= longEdge) break;
+
+      size = scaleByLongEdge(size.width, size.height, nextLongEdge);
+      longEdge = Math.max(size.width, size.height);
+      canvas = drawImageToCanvas(image, size.width, size.height);
+      quality = UPLOAD_IMAGE_INITIAL_QUALITY;
+    }
+
+    throw new Error(`图片“${file.name || "未命名"}”压缩后仍超过 900KB，请更换图片`);
+  } finally {
+    cleanup();
+  }
+}
+
+async function compressFilesForUpload(files) {
+  const output = [];
+  for (const file of files) {
+    output.push(await compressImageForUpload(file));
+  }
+  return output;
 }
 
 function escapeHtml(raw) {
@@ -477,15 +599,22 @@ function renderPendingFiles() {
   bindImagePreview();
 }
 
-function handleItemFileChange(e) {
+async function handleItemFileChange(e) {
   const files = [...(e.target.files || [])];
-  const remain = 9 - getEditExistingImageCount() - state.pendingFiles.length;
+  const remain = MAX_IMAGES_PER_ITEM - getEditExistingImageCount() - state.pendingFiles.length;
   if (remain <= 0) {
     toast("图片最多 9 张");
     e.target.value = "";
     return;
   }
-  files.slice(0, remain).forEach((f) => state.pendingFiles.push({ file: f, previewUrl: URL.createObjectURL(f) }));
+  const selected = files.slice(0, remain);
+  try {
+    const compressed = await compressFilesForUpload(selected);
+    compressed.forEach((f) => state.pendingFiles.push({ file: f, previewUrl: URL.createObjectURL(f) }));
+    if (files.length > remain) toast(`最多上传 ${MAX_IMAGES_PER_ITEM} 张图片，已忽略超出部分`);
+  } catch (err) {
+    toast(err.message || "图片压缩失败");
+  }
   e.target.value = "";
   renderPendingFiles();
 }
@@ -521,16 +650,23 @@ function clearEditPendingFiles() {
   renderEditPendingFiles();
 }
 
-function handleEditItemFileChange(e) {
+async function handleEditItemFileChange(e) {
   const files = [...(e.target.files || [])];
   const currentCount = byId("itemEditCurrentImages")?.querySelectorAll("img.thumb").length || 0;
-  const remain = 9 - currentCount - state.editPendingFiles.length;
+  const remain = MAX_IMAGES_PER_ITEM - currentCount - state.editPendingFiles.length;
   if (remain <= 0) {
     toast("图片最多 9 张");
     e.target.value = "";
     return;
   }
-  files.slice(0, remain).forEach((f) => state.editPendingFiles.push({ file: f, previewUrl: URL.createObjectURL(f) }));
+  const selected = files.slice(0, remain);
+  try {
+    const compressed = await compressFilesForUpload(selected);
+    compressed.forEach((f) => state.editPendingFiles.push({ file: f, previewUrl: URL.createObjectURL(f) }));
+    if (files.length > remain) toast(`最多上传 ${MAX_IMAGES_PER_ITEM} 张图片，已忽略超出部分`);
+  } catch (err) {
+    toast(err.message || "图片压缩失败");
+  }
   e.target.value = "";
   renderEditPendingFiles();
 }
@@ -1347,18 +1483,8 @@ function resetCategoryForm() {
 function renderItems() {
   const box = byId("itemsContainer");
   const pager = byId("itemsPagination");
-  const keyword = (state.itemKeyword || "").trim().toLowerCase();
-  const filtered = state.items.filter((it) => {
-    const hit = `${it.name || ""} ${it.brand || ""}`.toLowerCase();
-    if (keyword && !hit.includes(keyword)) return false;
-    if (state.itemHouseId && String(it.house_id) !== String(state.itemHouseId)) return false;
-    if (state.itemRoomId && String(it.room_id) !== String(state.itemRoomId)) return false;
-    if (state.itemCategoryId && String(it.category_id) !== String(state.itemCategoryId)) return false;
-    if (state.itemTagId && !(it.tags || []).some((tag) => String(tag.id) === String(state.itemTagId))) return false;
-    return true;
-  });
-
-  if (!filtered.length) {
+  const rows = state.items || [];
+  if (!rows.length) {
     box.innerHTML = "<p>暂无物品</p>";
     if (pager) pager.innerHTML = "";
     return;
@@ -1367,33 +1493,15 @@ function renderItems() {
   const roomNameById = new Map(state.rooms.map((r) => [Number(r.id), r.name || "-"]));
   const houseRoomText = (it) => `${it.house_name || "-"} - ${roomNameById.get(Number(it.room_id)) || "-"}`;
   const tagsText = (it) => (it.tags || []).map((x) => x.name).join("、") || "-";
-  const compareText = (a, b) => String(a || "").localeCompare(String(b || ""), "zh-CN", { sensitivity: "base" });
-  const compareDate = (a, b) => new Date(a || 0).getTime() - new Date(b || 0).getTime();
-  const key = state.itemSortKey || "updated_at";
-  const order = state.itemSortOrder === "asc" ? 1 : -1;
-  const sorted = [...filtered].sort((a, b) => {
-    let diff = 0;
-    if (key === "id") diff = Number(a.id || 0) - Number(b.id || 0);
-    else if (key === "name") diff = compareText(a.name, b.name);
-    else if (key === "house_room") diff = compareText(houseRoomText(a), houseRoomText(b));
-    else if (key === "category") diff = compareText(a.category_name, b.category_name);
-    else if (key === "tags") diff = compareText(tagsText(a), tagsText(b));
-    else if (key === "updated_at") diff = compareDate(a.updated_at, b.updated_at);
-    if (diff === 0) diff = Number(a.id || 0) - Number(b.id || 0);
-    return diff * order;
-  });
-
   const pageSize = state.itemPageSize || 20;
-  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
+  const totalPages = Math.max(1, state.itemTotalPages || 1);
   state.itemPage = Math.min(Math.max(1, state.itemPage || 1), totalPages);
-  const start = (state.itemPage - 1) * pageSize;
-  const pageRows = sorted.slice(start, start + pageSize);
   const sortLabel = (sortKey, title) => {
     if (state.itemSortKey !== sortKey) return title;
     return `${title}${state.itemSortOrder === "asc" ? " ▲" : " ▼"}`;
   };
 
-  const body = pageRows
+  const body = rows
     .map((it) => {
       const houseRoom = houseRoomText(it);
       const fullTags = tagsText(it);
@@ -1435,23 +1543,23 @@ function renderItems() {
         <select id="itemPageSize" class="page-size-select">
           ${[20, 50, 100].map((n) => `<option value="${n}" ${n === pageSize ? "selected" : ""}>${n}</option>`).join("")}
         </select>
-      条</span> 
-      <span>第 ${state.itemPage} / ${totalPages} 页（共 ${sorted.length} 条）</span>
+      条</span>
+      <span>第 ${state.itemPage} / ${totalPages} 页（共 ${state.itemTotal} 条）</span>
       <button class="ghost" data-page="prev" ${state.itemPage <= 1 ? "disabled" : ""}>上一页</button>
       <button class="ghost" data-page="next" ${state.itemPage >= totalPages ? "disabled" : ""}>下一页</button>`;
-    pager.onchange = (e) => {
+    pager.onchange = async (e) => {
       const select = e.target.closest("#itemPageSize");
       if (!select) return;
       state.itemPageSize = Number(select.value || 20);
       state.itemPage = 1;
-      renderItems();
+      await loadItems();
     };
-    pager.onclick = (e) => {
+    pager.onclick = async (e) => {
       const btn = e.target.closest("button[data-page]");
       if (!btn) return;
       if (btn.dataset.page === "prev" && state.itemPage > 1) state.itemPage -= 1;
       if (btn.dataset.page === "next" && state.itemPage < totalPages) state.itemPage += 1;
-      renderItems();
+      await loadItems();
     };
   }
 
@@ -1465,7 +1573,7 @@ function renderItems() {
         state.itemSortOrder = nextKey === "updated_at" ? "desc" : "asc";
       }
       state.itemPage = 1;
-      renderItems();
+      await loadItems();
       return;
     }
 
@@ -1633,7 +1741,31 @@ function fillItemForm(itemId) {
 }
 
 async function loadItems() {
-  state.items = await api("/api/items");
+  const page = Math.max(1, Number(state.itemPage) || 1);
+  const pageSize = Math.max(1, Number(state.itemPageSize) || 20);
+  const params = new URLSearchParams();
+  if (state.itemKeyword) params.set("q", state.itemKeyword);
+  if (state.itemHouseId) params.set("house_id", String(state.itemHouseId));
+  if (state.itemRoomId) params.set("room_id", String(state.itemRoomId));
+  if (state.itemCategoryId) params.set("category_id", String(state.itemCategoryId));
+  if (state.itemTagId) params.set("tag_id", String(state.itemTagId));
+  params.set("page", String(page));
+  params.set("page_size", String(pageSize));
+  params.set("sort_key", state.itemSortKey || "updated_at");
+  params.set("sort_order", state.itemSortOrder === "asc" ? "asc" : "desc");
+
+  const result = await api(`/api/items?${params.toString()}`);
+  state.items = Array.isArray(result.items) ? result.items : [];
+  state.itemTotal = Number(result.total || 0);
+  state.itemTotalPages = Number(result.total_pages || 0);
+  state.itemPage = Number(result.page || page);
+  state.itemPageSize = Number(result.page_size || pageSize);
+
+  if (state.itemTotal > 0 && state.itemTotalPages > 0 && state.itemPage > state.itemTotalPages) {
+    state.itemPage = state.itemTotalPages;
+    return loadItems();
+  }
+
   renderItems();
 }
 
@@ -2079,20 +2211,20 @@ if (imagePreviewStage) {
   );
 }
 
-byId("searchHouse").onchange = () => {
+byId("searchHouse").onchange = async () => {
   state.itemHouseId = byId("searchHouse").value || "";
   state.itemRoomId = "";
   state.itemPage = 1;
   filterRoomOptionsByHouse(byId("searchRoom"), state.itemHouseId, false, false);
   byId("searchRoom").value = "";
-  renderItems();
+  await loadItems();
 };
 byId("itemHouse").onchange = () => {
   const houseVal = byId("itemHouse").value;
   filterRoomOptionsByHouse(byId("itemRoom"), houseVal, false, true);
 };
 byId("roomHouse").onchange = () => syncRoomSortOrderInput();
-byId("searchBtn").onclick = () => {
+byId("searchBtn").onclick = async () => {
   state.itemKeyword = byId("searchQ").value.trim();
   state.itemHouseId = byId("searchHouse").value || "";
   state.itemRoomId = byId("searchRoom").value || "";
@@ -2101,9 +2233,9 @@ byId("searchBtn").onclick = () => {
   const tag = state.tags.find((x) => x.name.toLowerCase() === state.itemTagKeyword.toLowerCase());
   state.itemTagId = tag ? String(tag.id) : "";
   state.itemPage = 1;
-  renderItems();
+  await loadItems();
 };
-byId("resetSearchBtn").onclick = () => {
+byId("resetSearchBtn").onclick = async () => {
   state.itemKeyword = "";
   state.itemHouseId = "";
   state.itemRoomId = "";
@@ -2113,7 +2245,7 @@ byId("resetSearchBtn").onclick = () => {
   state.itemPage = 1;
   ["searchQ", "searchHouse", "searchRoom", "searchCategory", "searchTagKeyword"].forEach((id) => (byId(id).value = ""));
   filterRoomOptionsByHouse(byId("searchRoom"), "", false, false);
-  renderItems();
+  await loadItems();
 };
 if (byId("houseKeyword")) {
   byId("houseKeyword").oninput = (e) => {
