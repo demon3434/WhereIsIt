@@ -35,120 +35,104 @@
 │  └─ templates/        # 页面模板
 ├─ docs/
 │  └─ 数据字典.md
-├─ docker-compose.yml
-├─ docker-compose(self-build).yml
+├─ docker-compose.avahi.yml
+├─ docker-compose.avahi.self-build.yml
 ├─ Dockerfile
+├─ scripts/
+│  └─ setup_avahi_whereisit.sh
 └─ .env
 ```
 
 ## 4. 部署（新手必读）
 
-本项目提供两种部署方式，请先选一种：
+当前统一采用“Docker bridge 网络 + Avahi 反射 mDNS”的部署方式。  
+你可以二选一：
 
-1. 使用已发布镜像部署（推荐，最快）
-2. 用本地代码构建镜像后部署（用于你要改代码的场景）
+1. 使用 DockerHub 已发布镜像（最快）
+2. 使用本地代码自行 build 镜像（适合改代码）
 
 ### 4.1 前置条件
 
+- Debian/Ubuntu Linux 服务器（推荐）
 - 已安装 Docker Engine 与 Docker Compose（`docker compose version` 可用）
-- 服务器可联网拉取镜像
-- 你有一个工作目录（例如 `/opt/docker/whereisit`）
+- 服务器可访问局域网（手机和服务器在同一网段）
+- 你有部署目录（例如 `/opt/docker/whereisit`）
 
-### 4.2 准备环境变量 `.env`
+### 4.2 进入部署目录
 
-在部署目录创建或编辑 `.env`（仓库内已有示例，可直接复制后改值）：
+```bash
+cd /opt/docker/whereisit
+```
+
+目录中应包含：
+- `.env`
+- `docker-compose.avahi.yml`
+- `docker-compose.avahi.self-build.yml`
+- `scripts/setup_avahi_whereisit.sh`
+
+### 4.3 准备 `.env`（至少确认以下参数）
 
 ```env
-APP_NAME=WhereIsIt
-APP_ENV=production
-SECRET_KEY=please-change-this-secret
-ACCESS_TOKEN_EXPIRE_MINUTES=10080
-CORS_ORIGINS=*
+WEB_PORT=3000
 POSTGRES_DB=whereisit
 POSTGRES_USER=whereisit
 POSTGRES_PASSWORD=whereisit
-UPLOAD_DIR=/data/uploads
-MAX_UPLOAD_MB=10
-MAX_IMAGES_PER_ITEM=9
-DEFAULT_ADMIN_USERNAME=admin
-DEFAULT_ADMIN_PASSWORD=123456
-DEFAULT_ADMIN_NICKNAME=管理员
-SYNC_DEFAULT_ADMIN_PASSWORD=true
-WEB_PORT=3000
+SERVICE_DISCOVERY_ENABLED=true
+SERVICE_DISCOVERY_TYPE=_whereisit._tcp.local.
+SERVICE_DISCOVERY_NAME=WhereIsIt
+SERVICE_ADVERTISE_HOST=192.168.1.50
 ```
 
-### 4.3 方式 A：使用 DockerHub 镜像部署（推荐）
+说明：
+- `SERVICE_ADVERTISE_HOST` 必须填写服务器局域网 IP（手机可访问）
+- 不要填 `127.0.0.1`，也不要填 `172.x.x.x` 这类 Docker 内网地址
 
-`docker-compose.yml` 默认使用镜像：`demon3434/where_is_it:latest`。
+### 4.4 首次执行 Avahi 自动配置（只需一次）
 
-适合人群：
-- 不改代码，只想快速部署
-- 想和 DockerHub 最新镜像保持一致
-
-操作步骤：
-
-1. 进入部署目录（目录中应有 `docker-compose.yml` 和 `.env`）
-2. 拉取并启动容器
+给脚本执行权限并运行：
 
 ```bash
-docker compose pull
-docker compose up -d
-docker compose ps
+chmod +x scripts/setup_avahi_whereisit.sh
+sudo bash scripts/setup_avahi_whereisit.sh
 ```
 
-3. 打开健康检查确认服务正常
+脚本会自动：
+- 安装 `avahi-daemon`
+- 创建/校验 Docker 网络 `whereisit_mdns`（桥接网卡 `br-whereisit`）
+- 写入 Avahi 反射配置并重启服务
+
+### 4.5 方式 A：DockerHub 镜像部署（推荐）
 
 ```bash
-# 在宿主机上运行
+docker compose -f docker-compose.avahi.yml pull
+docker compose -f docker-compose.avahi.yml up -d
+docker compose -f docker-compose.avahi.yml ps
+```
+
+### 4.6 方式 B：本地代码 build 镜像部署
+
+```bash
+docker compose -f docker-compose.avahi.self-build.yml up -d --build
+docker compose -f docker-compose.avahi.self-build.yml ps
+```
+
+### 4.7 部署后验证
+
+1. 检查后端健康：
+```bash
 curl http://127.0.0.1:${WEB_PORT}/api/health
 ```
 
-如果返回 `{"status":"ok"}`，说明部署成功。
-
-### 4.4 方式 B：用本地代码构建镜像部署
-
-`docker-compose(self-build).yml` 是“根据当前目录代码构建并运行”的 Compose 文件，不依赖 DockerHub 的应用镜像。
-
-适合人群：
-- 你改了代码，想直接在本机/服务器用当前代码运行
-- 你不想依赖外网拉取应用镜像
-
-操作步骤：
-
+2. 检查 mDNS 是否被发现：
 ```bash
-docker compose -f 'docker-compose(self-build).yml' up -d --build
-docker compose -f 'docker-compose(self-build).yml' ps
+avahi-browse -atr | grep -i whereisit
 ```
 
-### 4.5 两个 Compose 文件的区别（重要）
-
-- `docker-compose.yml`
-  - 使用远程镜像 `demon3434/where_is_it:latest`
-  - 启动快，适合生产部署和新手
-
-- `docker-compose(self-build).yml`
-  - 使用本地代码 `build` 镜像
-  - 适合开发、测试、改代码后验证
-
-建议：
-- 生产环境优先用 `docker-compose.yml`
-- 开发调试优先用 `docker-compose(self-build).yml`
-
-### 4.6 直接用 `docker run` 运行镜像（可选）
-
-如果你不想用 Compose，也可以直接运行：
-
-1. 用 `.env` 传参：
-
-```bash
-docker run -d --name whereisit-app --env-file .env -p 3000:3000 demon3434/where_is_it:latest
-```
-
-2. 或在命令行覆盖单个参数（优先级高于 `--env-file`）：
-
-```bash
-# 以修改 ACCESS_TOKEN_EXPIRE_MINUTES 参数为例
-docker run -d --name whereisit-app --env-file .env -e ACCESS_TOKEN_EXPIRE_MINUTES=525600 -p 3000:3000 demon3434/where_is_it:latest
+出现类似以下内容即说明发现链路正常：
+```text
++ br-whereisit IPv4 WhereIsIt _whereisit._tcp local
+= br-whereisit IPv4 WhereIsIt _whereisit._tcp local
+  hostname = [whereisit.local]
 ```
 
 ## 5. 关键可配置参数说明
