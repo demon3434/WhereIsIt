@@ -1,0 +1,60 @@
+      <div id="usersTab" class="tab-panel hidden">
+        <div class="card">
+          <h2>新增用户 <span class="user-hint">初始密码为 <code>123456</code></span></h2>
+          <form id="adminUserForm" class="category-create-form user-create-form">
+            <label>登录账号<input name="username" required /></label>
+            <label>姓名<input name="full_name" /></label>
+            <label>角色
+              <select name="role">
+                <option value="user">普通用户</option>
+                <option value="admin">管理员</option>
+              </select>
+            </label>
+            <label class="available-house-field">可用房屋
+              <select id="adminAvailableHouses" name="available_house_ids" multiple class="hidden"></select>
+              <div id="adminAvailableHousePicker" class="multi-picker">
+                <button type="button" id="adminAvailableHouseToggle" class="multi-picker-toggle">
+                  <span id="adminAvailableSummary">请选择可用房屋</span>
+                  <span class="caret">▾</span>
+                </button>
+                <div id="adminAvailableHousePanel" class="multi-picker-panel">
+                  <label class="picker-option picker-option-all"><input type="checkbox" id="adminAvailableAll" />全选</label>
+                  <div id="adminAvailableList" class="multi-picker-list"></div>
+                </div>
+                <div id="adminAvailableChips" class="picker-chip-wrap"></div>
+              </div>
+            </label>
+            <label>默认房屋<select id="adminDefaultHouse" name="default_house_id"></select></label>
+            <button type="submit">新增用户</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>用户列表</h2>
+          <div class="category-filter-row user-filter-row">
+            <div class="category-filter-group">
+              <span class="category-filter-title">按关键字筛选</span>
+              <input id="userKeyword" class="category-filter-input" placeholder="账号/姓名" />
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按状态筛选</span>
+              <select id="userStatus" class="category-filter-select">
+                <option value="">全部状态</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按角色筛选</span>
+              <select id="userRole" class="category-filter-select">
+                <option value="">全部角色</option>
+                <option value="admin">管理员</option>
+                <option value="user">普通用户</option>
+              </select>
+            </div>
+            <button type="button" id="userClearBtn" class="ghost category-clear-btn">清空筛选</button>
+          </div>
+          <div id="adminUsersContainer"></div>
+          <div id="adminUsersPagination" class="table-pagination"></div>
+        </div>
+      </div>

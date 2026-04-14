@@ -1,0 +1,27 @@
+      <div class="tabs">
+        <div class="tabs-left">
+          <a class="brand-tab" href="/items">
+            <img src="/static/img/logo-64.png?v=20260406b" alt="找东西 Logo" />
+            <span>找东西</span>
+          </a>
+          <span class="brand-sep">|</span>
+          <a class="tab" data-tab="items" href="/items">物品管理</a>
+          <a class="tab" data-tab="locations" href="/locations">位置管理</a>
+          <a class="tab" data-tab="categories" href="/categories">分类管理</a>
+          <a class="tab" data-tab="tags" href="/tags">标签管理</a>
+          <a class="tab" data-tab="users" href="/users">用户管理</a>
+        </div>
+
+        <div class="tabs-right">
+          <div id="userMenuWrap" class="user-menu-wrap hidden">
+            <button id="currentUserBtn" type="button" class="user-menu-trigger">
+              <span id="currentUser">用户</span>
+              <span class="caret" aria-hidden="true">▼</span>
+            </button>
+            <div id="userMenu" class="user-menu hidden">
+              <a id="goProfileBtn" href="/profile" class="user-menu-item">个人信息</a>
+              <button id="logoutBtn" type="button" class="user-menu-item danger">退出登录</button>
+            </div>
+          </div>
+        </div>
+      </div>

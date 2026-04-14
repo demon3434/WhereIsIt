@@ -1,0 +1,32 @@
+      <div id="categoriesTab" class="tab-panel hidden">
+        <div class="card">
+          <h2>新增分类</h2>
+          <form id="categoryForm" class="category-create-form">
+            <label>序号<input type="number" min="0" name="sort_order" value="0" /></label>
+            <label>分类名称<input required name="name" /></label>
+            <button type="submit">新增分类</button>
+            <button type="button" id="cancelCategoryEditBtn" class="ghost hidden">取消</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>分类列表</h2>
+          <div class="category-filter-row">
+            <div class="category-filter-group">
+              <span class="category-filter-title">按关键字筛选</span>
+              <input id="categoryKeyword" class="category-filter-input" placeholder="输入分类名称关键字" />
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按状态筛选</span>
+              <select id="categoryStatus" class="category-filter-select">
+                <option value="">全部状态</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+            <button type="button" id="categoryClearBtn" class="ghost category-clear-btn">清空筛选</button>
+          </div>
+          <div id="categoriesContainer"></div>
+          <div id="categoriesPagination" class="table-pagination"></div>
+        </div>
+      </div>

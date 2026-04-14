@@ -1,0 +1,11 @@
+  <script>
+    window.addEventListener("error", function () {
+      document.body.classList.remove("booting");
+    });
+    window.addEventListener("unhandledrejection", function () {
+      document.body.classList.remove("booting");
+    });
+    setTimeout(function () {
+      document.body.classList.remove("booting");
+    }, 1200);
+  </script>

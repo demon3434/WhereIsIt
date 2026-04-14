@@ -1,0 +1,59 @@
+      <div id="locationsTab" class="tab-panel hidden">
+        <div class="location-subtabs">
+          <button type="button" class="location-subtab active" data-loc-tab="house">房屋管理</button>
+          <button type="button" class="location-subtab" data-loc-tab="room">房间管理</button>
+        </div>
+
+        <div id="locationHousePanel">
+          <div class="card">
+            <h2>新增房屋</h2>
+            <form id="houseForm" class="category-create-form house-create-form">
+              <input type="hidden" name="id" />
+              <label>序号<input type="number" min="0" name="sort_order" value="0" /></label>
+              <label>房屋名称<input required name="name" /></label>
+              <button type="submit">新增房屋</button>
+              <button type="button" id="cancelHouseEditBtn" class="ghost hidden">取消</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h2>房屋列表</h2>
+            <div class="category-filter-row house-filter-row">
+              <div class="category-filter-group">
+                <span class="category-filter-title">按关键字筛选</span>
+                <input id="houseKeyword" class="category-filter-input" placeholder="输入房屋名称关键字" />
+              </div>
+              <div class="category-filter-group category-filter-group-status">
+                <span class="category-filter-title">按状态筛选</span>
+                <select id="houseStatus" class="category-filter-select">
+                  <option value="">全部状态</option>
+                  <option value="enabled">启用</option>
+                  <option value="disabled">停用</option>
+                </select>
+              </div>
+              <button type="button" id="houseClearBtn" class="ghost category-clear-btn">清空筛选</button>
+            </div>
+            <div id="housesContainer"></div>
+            <div id="housesPagination" class="table-pagination"></div>
+          </div>
+        </div>
+
+        <div id="locationRoomPanel" class="hidden">
+          <div class="card">
+            <h2>新增房间</h2>
+            <form id="roomForm" class="category-create-form room-create-form">
+              <input type="hidden" name="id" />
+              <label>所属房屋<select id="roomHouse" name="house_id" required></select></label>
+              <label>房屋内序号<input type="number" min="0" name="sort_order" value="0" /></label>
+              <label>房间名称<input required name="name" /></label>
+              <button type="submit">新增房间</button>
+              <button type="button" id="cancelRoomEditBtn" class="ghost hidden">取消编辑</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <h2>房间列表</h2>
+            <div id="roomsTreeContainer"></div>
+          </div>
+        </div>
+      </div>

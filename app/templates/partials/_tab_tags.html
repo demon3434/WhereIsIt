@@ -1,0 +1,30 @@
+      <div id="tagsTab" class="tab-panel hidden">
+        <div class="card">
+          <h2>新增标签</h2>
+          <form id="tagForm" class="category-create-form">
+            <label>标签名称<input required name="name" /></label>
+            <button type="submit">新增标签</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>标签列表</h2>
+          <div class="category-filter-row">
+            <div class="category-filter-group">
+              <span class="category-filter-title">按关键字筛选</span>
+              <input id="tagKeyword" class="category-filter-input" placeholder="输入标签名称关键字" />
+            </div>
+            <div class="category-filter-group category-filter-group-status">
+              <span class="category-filter-title">按状态筛选</span>
+              <select id="tagStatus" class="category-filter-select">
+                <option value="">全部状态</option>
+                <option value="enabled">启用</option>
+                <option value="disabled">停用</option>
+              </select>
+            </div>
+            <button type="button" id="tagClearBtn" class="ghost category-clear-btn">清空筛选</button>
+          </div>
+          <div id="tagsContainer"></div>
+          <div id="tagsPagination" class="table-pagination"></div>
+        </div>
+      </div>

@@ -1,0 +1,71 @@
+      <div id="itemsTab" class="tab-panel">
+        <div class="item-subtabs">
+          <button type="button" class="item-subtab active" data-item-tab="create">新增物品</button>
+          <button type="button" class="item-subtab" data-item-tab="list">物品列表</button>
+        </div>
+
+        <div id="itemCreatePanel">
+          <div class="card">
+            <form id="itemForm" class="item-create-form">
+              <input type="hidden" name="id" />
+
+              <div class="item-create-row item-create-row-4">
+                <label class="item-field"><span class="field-title">名称<span class="req">*</span></span><input required name="name" /></label>
+                <label class="item-field"><span class="field-title">品牌</span><input name="brand" /></label>
+                <label class="item-field"><span class="field-title">数量<span class="req">*</span></span><input type="number" min="1" step="1" required name="quantity" value="1" /></label>
+                <label class="item-field"><span class="field-title">分类<span class="req">*</span></span><select required name="category_id" id="itemCategory"></select></label>
+              </div>
+
+              <div class="item-create-row item-create-row-4">
+                <label class="item-field"><span class="field-title">房屋<span class="req">*</span></span><select required name="house_id" id="itemHouse"></select></label>
+                <label class="item-field"><span class="field-title">房间<span class="req">*</span></span><select required name="room_id" id="itemRoom"></select></label>
+                <label class="item-field item-field-3x"><span class="field-title">具体位置<span class="req">*</span></span><input required name="location_detail" /></label>
+              </div>
+
+              <div class="item-create-row item-tag-row">
+                <label class="item-field"><span class="field-title">标签</span>
+                  <input id="itemTagInput" list="itemTagOptions" placeholder="输入标签后回车" />
+                  <datalist id="itemTagOptions"></datalist>
+                </label>
+                <div id="itemTagChips" class="tag-chip-wrap item-tag-inline"></div>
+                <label class="hidden">标签隐藏<select name="tag_ids" id="itemTags" multiple></select></label>
+              </div>
+
+              <div class="item-create-row">
+                <label class="item-field">图片（最多上传 9 张）
+                  <input type="file" id="itemFiles" name="files" accept="image/*,.jpg,.jpeg,.png" multiple />
+                </label>
+              </div>
+
+              <div id="selectedFilesCount" class="file-count">已选 0 张新图片</div>
+              <div id="pendingImagePreview" class="image-grid"></div>
+              <div id="editImages" class="image-row"></div>
+
+              <div class="item-create-actions">
+                <button type="submit">新增物品</button>
+                <button type="button" id="cancelEditBtn" class="ghost hidden">取消编辑</button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div id="itemListPanel" class="hidden">
+          <div class="card item-list-filter-bar">
+            <label class="item-field">关键字<input id="searchQ" placeholder="名称或品牌" /></label>
+            <label class="item-field">房屋<select id="searchHouse"></select></label>
+            <label class="item-field">房间<select id="searchRoom"></select></label>
+            <label class="item-field">分类<select id="searchCategory"></select></label>
+            <label class="item-field">标签
+              <input id="searchTagKeyword" list="searchTagOptions" placeholder="输入标签关键字" />
+              <datalist id="searchTagOptions"></datalist>
+            </label>
+            <button id="searchBtn">筛选</button>
+            <button id="resetSearchBtn" class="ghost">清空筛选</button>
+          </div>
+
+          <div class="card">
+            <div id="itemsContainer"></div>
+            <div id="itemsPagination" class="table-pagination"></div>
+          </div>
+        </div>
+      </div>

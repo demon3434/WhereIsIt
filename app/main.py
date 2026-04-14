@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from sqlalchemy import select, text
 
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 app_dir = Path(__file__).resolve().parent
 static_dir = app_dir / "static"
 templates_dir = app_dir / "templates"
+templates = Jinja2Templates(directory=str(templates_dir))
 admin_allowed_paths = {"/items", "/locations", "/categories", "/tags", "/users", "/profile"}
 user_allowed_paths = {"/items"}
 
@@ -112,8 +114,8 @@ app.include_router(items.router)
 
 @app.get("/")
 @app.get("/login")
-def public_index():
-    return FileResponse(str(templates_dir / "index.html"))
+def public_index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 def has_page_access(user: User, path: str) -> bool:
@@ -179,7 +181,7 @@ def protected_index(request: Request, current_user: User | None = Depends(get_cu
         )
     if not has_page_access(current_user, request.url.path):
         return RedirectResponse(url="/forbidden", status_code=302)
-    return FileResponse(str(templates_dir / "index.html"))
+    return templates.TemplateResponse("index.html", {"request": request})
 
 
 @app.get("/api/health")

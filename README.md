@@ -7,7 +7,7 @@
 
 - 后端：FastAPI + SQLAlchemy
 - 数据库：PostgreSQL 16
-- 前端：单页应用（`app/templates/index.html` + `app/static/js/app.js`）
+- 前端：单页应用（`app/templates/index.html` + `app/static/js/app-*.js` 模块脚本）
 - 部署：Docker Compose
 
 ## 2. 功能概览
@@ -32,7 +32,7 @@
 │  ├─ routers/          # API 路由
 │  ├─ services/         # 业务服务（存储、mDNS）
 │  ├─ static/           # 静态资源（CSS/JS/图片）
-│  └─ templates/        # 页面模板
+│  └─ templates/        # 页面模板（index + partials 拆分）
 ├─ docs/
 │  └─ 数据字典.md
 ├─ docker-compose.avahi.yml
@@ -157,10 +157,10 @@ avahi-browse -atr | grep -i whereisit
 1. `db`（PostgreSQL）
 2. `app`（FastAPI）
 
-默认卷映射：
+默认卷映射（当前 compose 文件）：
 
-- `./data/db` -> PostgreSQL 数据目录
-- `./data/uploads` -> 上传图片目录
+- `/opt/docker/whereisit/data/db` -> PostgreSQL 数据目录
+- `/opt/docker/whereisit/data/uploads` -> 上传图片目录
 
 端口映射：
 
