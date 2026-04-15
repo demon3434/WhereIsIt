@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -11,7 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import Date, DateTime, Time, inspect, text
+from sqlalchemy import Date, DateTime, Time, create_engine, inspect, text
 from sqlalchemy.engine import Connection, make_url
 from starlette.background import BackgroundTask
 
@@ -66,9 +67,81 @@ def _db_conn_info() -> tuple[str, str, str, str, str]:
     )
 
 
-def _run_subprocess(command: list[str], *, error_message: str) -> None:
+def _query_db_major_version(database: str) -> int:
+    url = make_url(settings.database_url).set(database=database)
+    temp_engine = create_engine(url, pool_pre_ping=True)
+    try:
+        with temp_engine.connect() as conn:
+            version_num = conn.execute(text("SHOW server_version_num")).scalar_one_or_none()
+            if version_num is not None:
+                value = int(str(version_num))
+                return value // 10000
+
+            version_text = str(conn.execute(text("SHOW server_version")).scalar_one()).strip()
+            major_text = version_text.split(".", maxsplit=1)[0]
+            return int(major_text)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"无法获取目标数据库版本: {database}. {exc}",
+        ) from exc
+    finally:
+        temp_engine.dispose()
+
+
+def _extract_pg_tool_major(version_text: str) -> int:
+    match = re.search(r"(\d+)(?:\.\d+)?", version_text)
+    if not match:
+        raise ValueError(f"无法解析 PostgreSQL 工具版本: {version_text}")
+    return int(match.group(1))
+
+
+def _tool_major_version(tool_name: str) -> int:
+    try:
+        result = subprocess.run([tool_name, "--version"], capture_output=True, text=True, check=False)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"缺少 PostgreSQL 客户端命令: {tool_name}",
+        ) from exc
+    output = (result.stdout or result.stderr or "").strip()
+    if result.returncode != 0 or not output:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"无法检测 PostgreSQL 客户端版本: {tool_name}",
+        )
+    try:
+        return _extract_pg_tool_major(output)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc
+
+
+def _assert_pg_tool_major_matches_db(tool_name: str, database: str) -> None:
+    db_major = _query_db_major_version(database)
+    tool_major = _tool_major_version(tool_name)
+    if db_major != tool_major:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                f"PostgreSQL 工具版本不匹配: 数据库主版本={db_major}, {tool_name} 主版本={tool_major}。"
+                f"请使用与数据库同主版本的客户端工具后重试。"
+            ),
+        )
+
+
+def _run_subprocess(
+    command: list[str], *, error_message: str, target_database: str | None = None, tool_name: str | None = None
+) -> None:
     _, _, _, password, _ = _db_conn_info()
     env = {**os.environ, "PGPASSWORD": password}
+    pg_tool = tool_name or (command[0] if command else "")
+    if not pg_tool:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="无效的子进程命令")
+    if target_database:
+        _assert_pg_tool_major_matches_db(pg_tool, target_database)
     try:
         result = subprocess.run(command, capture_output=True, text=True, env=env, check=False)
     except FileNotFoundError as exc:
@@ -235,7 +308,7 @@ def export_database_fast(admin: User = Depends(require_admin)):
         "-f",
         backup_path,
     ]
-    _run_subprocess(command, error_message="高性能数据库导出失败")
+    _run_subprocess(command, error_message="高性能数据库导出失败", target_database=database, tool_name="pg_dump")
 
     filename = f"whereisit-db-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.dump"
     return FileResponse(
@@ -273,7 +346,7 @@ async def import_database_fast(file: UploadFile = File(...), admin: User = Depen
                 "-f",
                 temp_path,
             ]
-            _run_subprocess(command, error_message="SQL 备份导入失败")
+            _run_subprocess(command, error_message="SQL 备份导入失败", target_database=database, tool_name="psql")
         else:
             command = [
                 "pg_restore",
@@ -292,7 +365,12 @@ async def import_database_fast(file: UploadFile = File(...), admin: User = Depen
                 "--single-transaction",
                 temp_path,
             ]
-            _run_subprocess(command, error_message="高性能数据库还原失败")
+            _run_subprocess(
+                command,
+                error_message="高性能数据库还原失败",
+                target_database=database,
+                tool_name="pg_restore",
+            )
     finally:
         Path(temp_path).unlink(missing_ok=True)
 

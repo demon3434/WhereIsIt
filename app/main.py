@@ -15,7 +15,7 @@ from .config import settings
 from .database import Base, SessionLocal, engine
 from .deps import get_current_user_optional
 from .models import House, User
-from .routers import admin_users, auth, categories, houses, items, rooms, tags, users
+from .routers import admin_users, auth, categories, data_management, gui_backup, houses, items, rooms, tags, users
 from .services.mdns import ServiceDiscoveryBroadcaster
 from .services.storage import ensure_upload_dir
 
@@ -110,6 +110,8 @@ app.include_router(tags.router)
 app.include_router(houses.router)
 app.include_router(rooms.router)
 app.include_router(items.router)
+app.include_router(data_management.router)
+app.include_router(gui_backup.router)
 
 
 @app.get("/")
