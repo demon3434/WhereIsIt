@@ -16,6 +16,7 @@
 - 位置管理：房屋管理 + 房间管理
 - 分类管理、标签管理
 - 用户管理（管理员）
+- 不包含“数据管理”页面与 GUI 备份恢复 API（已下线）
 - 图片压缩策略（Android/Web 统一）：
   - 新增、编辑物品时，Web 端上传前先压缩并统一转 JPEG（透明图铺白底）
   - 先限制长边 `<=1600`，初始质量 `0.82`，单图目标 `<=900KB`
@@ -34,7 +35,10 @@
 │  ├─ static/           # 静态资源（CSS/JS/图片）
 │  └─ templates/        # 页面模板（index + partials 拆分）
 ├─ docs/
-│  └─ 数据字典.md
+│  ├─ 数据字典.md
+│  ├─ 内网服务发现技术规范.md
+│  ├─ GUI备份恢复API.md
+│  └─ GUI接口测试报告与CSharp示例.md
 ├─ docker-compose.avahi.yml
 ├─ docker-compose.avahi.self-build.yml
 ├─ Dockerfile
@@ -172,7 +176,16 @@ avahi-browse -atr | grep -i whereisit
 
 - `docs/数据字典.md`
 
-## 8. 生产环境建议
+## 8. API 兼容说明
+
+- 当前版本已移除 GUI 备份恢复相关接口：
+  - `/api/tasks*`
+  - `/api/backup/*`
+  - `/api/restore/*`
+  - `/api/admin/data/*`
+- 当前保留的核心接口以业务 CRUD 与认证为主（如 `/api/auth/*`、`/api/me`、`/api/items` 等）。
+
+## 9. 生产环境建议
 
 - 修改 `SECRET_KEY`、数据库密码、默认管理员密码
 - 将 `CORS_ORIGINS` 限制为可信域名

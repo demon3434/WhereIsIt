@@ -6,7 +6,9 @@ byId("loginForm").onsubmit = async (e) => {
       method: "POST",
       body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }),
     });
-    setToken(r.access_token);
+    const token = r?.data?.access_token || r?.access_token || "";
+    if (!token) throw new Error("登录返回缺少 access_token");
+    setToken(token);
     await afterLogin();
   } catch (err) {
     toast(err.message);

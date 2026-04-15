@@ -6,12 +6,13 @@ from ..auth import create_access_token, verify_password
 from ..config import settings
 from ..database import get_db
 from ..models import OperationLog, User
-from ..schemas import MessageOut, TokenOut, UserLogin
+from ..deps import get_current_user
+from ..schemas import MessageOut, UserLogin, UserOut
 
 router = APIRouter(prefix="/api/auth", tags=["??"])
 
 
-@router.post("/login", response_model=TokenOut)
+@router.post("/login")
 def login(payload: UserLogin, response: Response, db: Session = Depends(get_db)):
     username = payload.username.strip()
     password = payload.password.strip()
@@ -34,7 +35,12 @@ def login(payload: UserLogin, response: Response, db: Session = Depends(get_db))
         samesite="lax",
         path="/",
     )
-    return TokenOut(access_token=token)
+    token_payload = {"access_token": token, "token_type": "bearer"}
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": token_payload,
+    }
 
 
 @router.post("/logout", response_model=MessageOut)
@@ -45,3 +51,8 @@ def logout(response: Response):
         samesite="lax",
     )
     return MessageOut(message="?????")
+
+
+@router.get("/me", response_model=UserOut)
+def auth_me(current_user: User = Depends(get_current_user)):
+    return current_user
