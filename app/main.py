@@ -1,8 +1,11 @@
 import asyncio
+import json
 import logging
+from typing import Any
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -40,15 +43,94 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 
+def _ok(data: Any = None, message: str = "ok") -> dict[str, Any]:
+    return {"code": 0, "message": message, "data": data}
+
+
+def _error(status_code: int, message: str, data: Any = None) -> dict[str, Any]:
+    return {"code": status_code, "message": message, "data": data}
+
+
+def _is_envelope(payload: Any) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    return "code" in payload and "message" in payload and "data" in payload
+
+
+@app.middleware("http")
+async def api_envelope_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        return response
+    if isinstance(response, (FileResponse, RedirectResponse)):
+        return response
+
+    content_disposition = str(response.headers.get("content-disposition", "")).lower()
+    if "attachment" in content_disposition:
+        return response
+
+    media_type = str(response.media_type or response.headers.get("content-type", "")).lower()
+    if "application/json" not in media_type:
+        return response
+    if response.status_code >= 400:
+        return response
+
+    chunks: list[bytes] = []
+    async for chunk in response.body_iterator:
+        chunks.append(chunk)
+    body = b"".join(chunks).strip()
+
+    if not body:
+        payload: Any = None
+    else:
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except Exception:
+            return response
+
+    content = payload if _is_envelope(payload) else _ok(payload)
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    return JSONResponse(
+        status_code=response.status_code,
+        content=content,
+        headers=headers,
+    )
+
+
 @app.exception_handler(StarletteHTTPException)
 async def custom_http_exception_handler(request: Request, exc: StarletteHTTPException):
     if exc.status_code != status.HTTP_404_NOT_FOUND:
         if request.url.path.startswith("/api/"):
-            return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+            detail = exc.detail
+            if isinstance(detail, str):
+                return JSONResponse(status_code=exc.status_code, content=_error(exc.status_code, detail))
+            return JSONResponse(status_code=exc.status_code, content=_error(exc.status_code, "Request failed", detail))
         return HTMLResponse(content=str(exc.detail), status_code=exc.status_code)
     if request.url.path.startswith("/api/"):
-        return JSONResponse(status_code=exc.status_code, content={"detail": "Not Found"})
+        return JSONResponse(status_code=exc.status_code, content=_error(exc.status_code, "Not Found"))
     return FileResponse(str(templates_dir / "not_found.html"), status_code=status.HTTP_404_NOT_FOUND)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    if request.url.path.startswith("/api/"):
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content=_error(status.HTTP_422_UNPROCESSABLE_ENTITY, "Validation Error", exc.errors()),
+        )
+    return HTMLResponse(content="Validation Error", status_code=status.HTTP_422_UNPROCESSABLE_ENTITY)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled exception", exc_info=exc)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            content=_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "Internal Server Error"),
+        )
+    return HTMLResponse(content="Internal Server Error", status_code=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 @app.on_event("startup")

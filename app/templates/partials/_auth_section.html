@@ -1,12 +1,12 @@
-    <section id="authSection" class="card auth-card">
-      <div id="loginPage" class="auth-page">
-        <h2>登录</h2>
-        <form id="loginForm" class="panel">
-          <label>用户名<input required name="username" /></label>
-          <label>密码<input required type="password" name="password" /></label>
-          <div class="auth-actions login-actions">
-            <button type="submit">登录</button>
-          </div>
-        </form>
+<section id="authSection" class="card auth-card">
+  <div id="loginPage" class="auth-page">
+    <h2>登录</h2>
+    <form id="loginForm" class="panel" method="post" action="/login" novalidate>
+      <label>用户名<input required name="username" autocomplete="username" /></label>
+      <label>密码<input required type="password" name="password" autocomplete="current-password" /></label>
+      <div class="auth-actions login-actions">
+        <button type="submit">登录</button>
       </div>
-    </section>
+    </form>
+  </div>
+</section>

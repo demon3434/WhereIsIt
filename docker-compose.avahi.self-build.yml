@@ -20,7 +20,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: whereisit:local
+    image: whereisit:latest
     restart: unless-stopped
     env_file:
       - .env

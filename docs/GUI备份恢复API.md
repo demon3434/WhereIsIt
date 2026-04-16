@@ -35,6 +35,8 @@ GUI 备份恢复接口统一返回 envelope：
 }
 ```
 
+完整清单与异常约定见 [API-Envelope接口文档.md](/E:/code/WhereIsIt/docs/API-Envelope接口文档.md)。
+
 ## 3. 任务接口
 
 1. `GET /api/tasks`：任务列表  
@@ -154,4 +156,3 @@ GUI 备份恢复接口统一返回 envelope：
 2. 所有 GUI 接口都带 `Authorization: Bearer <token>`  
 3. `modifiedAfter` 可传 `null`  
 4. 恢复数据库时若报版本不匹配，请用与数据库同主版本的 `pg_dump` 重新导出备份文件  
-

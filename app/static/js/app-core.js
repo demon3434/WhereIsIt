@@ -266,9 +266,22 @@ async function api(path, options = {}) {
   if (!(options.body instanceof FormData) && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const res = await fetch(path, { ...options, headers });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || data.message || "请求失败");
-  return data;
+  const data = await res.json().catch(() => null);
+  const envelope =
+    data && typeof data === "object" && !Array.isArray(data) && "code" in data && "message" in data && "data" in data
+      ? data
+      : null;
+
+  if (!res.ok) {
+    if (envelope) throw new Error(envelope.message || "????");
+    throw new Error(data?.detail || data?.message || "????");
+  }
+
+  if (envelope) {
+    if (Number(envelope.code || 0) !== 0) throw new Error(envelope.message || "????");
+    return envelope.data;
+  }
+  return data ?? {};
 }
 
 function setToken(token) {
@@ -287,6 +300,7 @@ function pathToTab() {
   if (p === "/categories") return "categories";
   if (p === "/tags") return "tags";
   if (p === "/users") return "users";
+  if (p === "/data-management") return "data";
   if (p === "/profile") return "profile";
   return "items";
 }
@@ -441,7 +455,9 @@ function resetAuthView() {
 
 function applyRoleView() {
   const isAdmin = state.me?.role === "admin";
-  const allowed = isAdmin ? new Set(["items", "locations", "categories", "tags", "users", "profile"]) : new Set(["items", "profile"]);
+  const allowed = isAdmin
+    ? new Set(["items", "locations", "categories", "tags", "users", "data", "profile"])
+    : new Set(["items", "profile"]);
   document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("hidden", !allowed.has(tab.dataset.tab)));
   if (!allowed.has(pathToTab())) window.location.href = "/items";
 }
@@ -2126,4 +2142,3 @@ function clearAdminUserForm() {
   setAdminAvailableHouseIds([]);
   state.userInlineEdit = null;
 }
-

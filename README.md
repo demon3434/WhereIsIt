@@ -9,34 +9,41 @@ WhereIsIt 是一个自托管的家庭物品管理系统，支持房屋/房间定
 - 前端：Jinja2 + 原生 JavaScript
 - 部署：Docker Compose
 
-## 当前可用能力（20260416 代码）
+## 当前能力（2026-04-16）
 
 - 物品、位置、分类、标签、用户管理
 - 登录鉴权（Cookie + Bearer Token）
 - 健康检查：`GET /api/health`
-- GUI 备份恢复 API（在线）：
+- GUI 备份恢复 API：
   - 任务查询与取消：`/api/tasks*`
   - 数据库备份恢复：`/api/backup/database*`、`/api/restore/database*`
   - 图片备份恢复：`/api/backup/uploads*`、`/api/restore/uploads*`
   - 管理端数据导入导出：`/api/admin/data/*`
 
-## 认证与返回格式
+## API 返回格式
 
-- 登录接口：`POST /api/auth/login`
-- 登录返回是 envelope：
+- 所有 `/api/*` 的 JSON 接口统一返回 envelope：
   - `code`
   - `message`
-  - `data.access_token`
-  - `data.token_type`
-- 健康检查接口是：`GET /api/health`，返回 `{ "status": "ok" }`
+  - `data`
+- 健康检查示例：
 
-## GUI 备份恢复说明
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "status": "ok"
+  }
+}
+```
 
-- GUI 文档见 [GUI备份恢复API.md](/E:/code/WhereIsIt/docs/GUI备份恢复API.md)。
-- 任务状态（task/manifest/upload 索引）当前是进程内存态：
-  - 服务重启后会清空任务状态
-  - 不影响已落盘的备份文件本身
-- 数据库备份恢复调用 `pg_dump/pg_restore/psql`，并在执行前校验工具主版本与目标数据库主版本一致。
+## 文档索引
+
+- [API-Envelope接口文档.md](/E:/code/WhereIsIt/docs/API-Envelope接口文档.md)
+- [GUI备份恢复API.md](/E:/code/WhereIsIt/docs/GUI备份恢复API.md)
+- [内网服务发现技术规范.md](/E:/code/WhereIsIt/docs/内网服务发现技术规范.md)
+- [数据字典.md](/E:/code/WhereIsIt/docs/数据字典.md)
 
 ## 目录
 
@@ -47,10 +54,11 @@ app/
   static/             静态资源
   templates/          页面模板
 docs/
+  API-Envelope接口文档.md
   GUI备份恢复API.md
-  GUI接口测试报告与CSharp示例.md
+  内网服务发现技术规范.md
+  数据字典.md
 Dockerfile
 docker-compose.avahi.yml
 docker-compose.avahi.self-build.yml
 ```
-

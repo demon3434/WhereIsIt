@@ -1,19 +1,25 @@
-byId("loginForm").onsubmit = async (e) => {
-  e.preventDefault();
-  const fd = new FormData(e.target);
-  try {
-    const r = await api("/api/auth/login", {
-      method: "POST",
-      body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }),
-    });
-    const token = r?.data?.access_token || r?.access_token || "";
-    if (!token) throw new Error("登录返回缺少 access_token");
-    setToken(token);
-    await afterLogin();
-  } catch (err) {
-    toast(err.message);
-  }
-};
+const loginForm = byId("loginForm");
+if (loginForm) {
+  loginForm.onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    try {
+      const r = await api("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ username: fd.get("username"), password: fd.get("password") }),
+      });
+      const token = r?.access_token || "";
+      if (!token) throw new Error("登录返回缺少 access_token");
+      setToken(token);
+      if (window.location.search) {
+        history.replaceState({}, "", window.location.pathname);
+      }
+      await afterLogin();
+    } catch (err) {
+      toast(err.message || "登录失败");
+    }
+  };
+}
 
 logoutBtn.onclick = async () => {
   closeUserMenu();
@@ -84,12 +90,20 @@ if (imagePreviewStage) {
   );
 }
 
-
 bindTopTabNavigation();
 
 (async function init() {
   const path = window.location.pathname.toLowerCase();
   if (path === "/login") switchAuthPage("login");
+
+  // Clear leaked credentials from URL, e.g. ?username=...&password=...
+  if (window.location.search) {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has("username") || params.has("password")) {
+      history.replaceState({}, "", window.location.pathname);
+    }
+  }
+
   if (!state.token) {
     resetAuthView();
     finishBoot();
