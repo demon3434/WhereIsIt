@@ -13,7 +13,7 @@ from fastapi.responses import FileResponse
 from ..config import settings
 from ..deps import require_admin
 from ..models import User
-from ..routers.data_management import _db_conn_info, _run_subprocess
+from ..services.db_executor import DbError, resolve_execution_plan, run_backup, run_restore
 from ..services.gui_backup import (
     TEMP_ROOT,
     create_task,
@@ -52,33 +52,34 @@ def _ensure_within(base: Path, target: Path) -> Path:
     return target_resolved
 
 
+def _db_name_or_default(raw_db_name: str) -> str:
+    db_name = (raw_db_name or "").strip()
+    return db_name or settings.postgres_db
+
+
+def _convert_preflight_to_response(plan_dict: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "serverVersion": plan_dict.get("serverVersion", ""),
+        "serverVersionNum": int(plan_dict.get("serverVersionNum", 0) or 0),
+        "resolvedMajor": int(plan_dict.get("resolvedMajor", 0) or 0),
+        "selectedStrategy": plan_dict.get("selectedStrategy"),
+        "selectedToolsImage": plan_dict.get("selectedToolsImage"),
+        "warnings": list(plan_dict.get("warnings", []) or []),
+        "canProceed": bool(plan_dict.get("canProceed", False)),
+        "blockingReason": plan_dict.get("blockingReason"),
+    }
+
+
 def _run_db_backup_task(task_id: str, db_name: str, fmt: str) -> None:
     try:
         if is_cancel_requested(task_id):
             set_task_status(task_id, "cancelled", stage="cancelled", message="cancelled by user", progress=0)
             return
         set_task_status(task_id, "running", stage="db_backup", message="exporting database", progress=10)
-        host, port, user, _, default_database = _db_conn_info()
-        database = db_name.strip() or default_database
+        database = _db_name_or_default(db_name)
 
         backup_path = TEMP_ROOT / f"{task_id}.dump"
-        command = [
-            "pg_dump",
-            "-h",
-            host,
-            "-p",
-            port,
-            "-U",
-            user,
-            "-d",
-            database,
-            "-Fc" if fmt == "custom" else "-Fp",
-            "--no-owner",
-            "--no-privileges",
-            "-f",
-            str(backup_path),
-        ]
-        _run_subprocess(command, error_message="数据库备份失败", target_database=database, tool_name="pg_dump")
+        execution = run_backup(database, fmt, backup_path, allow_local_fallback=False)
         if not backup_path.exists():
             raise RuntimeError("backup output missing")
 
@@ -92,17 +93,28 @@ def _run_db_backup_task(task_id: str, db_name: str, fmt: str) -> None:
             stage="completed",
             message="backup completed",
             progress=100,
-            metadata={"fileName": file_name, "size": file_size, "sha256": file_hash},
+            metadata={
+                "fileName": file_name,
+                "size": file_size,
+                "sha256": file_hash,
+                "toolVersion": execution.get("toolVersion", ""),
+                "serverVersion": execution.get("serverVersion", ""),
+                "strategy": execution.get("strategy"),
+                "selectedToolsImage": execution.get("selectedToolsImage"),
+                "fallbackUsed": bool(execution.get("fallbackUsed", False)),
+                "warnings": execution.get("warnings", []),
+            },
         )
-    except HTTPException as exc:
+    except DbError as exc:
         set_task_status(
             task_id,
             "failed",
             stage="failed",
             message="backup failed",
             progress=100,
-            error_code="DB_BACKUP_FAILED",
-            error_message=str(exc.detail),
+            error_code=exc.code or "PG_DUMP_FAILED",
+            error_message=str(exc),
+            metadata=exc.context,
         )
     except Exception as exc:
         set_task_status(
@@ -111,7 +123,7 @@ def _run_db_backup_task(task_id: str, db_name: str, fmt: str) -> None:
             stage="failed",
             message="backup failed",
             progress=100,
-            error_code="DB_BACKUP_FAILED",
+            error_code="PG_DUMP_FAILED",
             error_message=str(exc),
         )
 
@@ -130,61 +142,34 @@ def _run_db_restore_task(task_id: str, upload_file_id: str, target_db_name: str)
         if not source_file.exists():
             raise RuntimeError("restore source file missing")
 
-        host, port, user, _, default_database = _db_conn_info()
-        database = target_db_name.strip() or default_database
-        suffix = source_file.suffix.lower()
-        if suffix == ".sql":
-            command = [
-                "psql",
-                "-h",
-                host,
-                "-p",
-                port,
-                "-U",
-                user,
-                "-d",
-                database,
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-f",
-                str(source_file),
-            ]
-            _run_subprocess(command, error_message="SQL 备份导入失败", target_database=database, tool_name="psql")
-        else:
-            command = [
-                "pg_restore",
-                "-h",
-                host,
-                "-p",
-                port,
-                "-U",
-                user,
-                "-d",
-                database,
-                "--clean",
-                "--if-exists",
-                "--no-owner",
-                "--no-privileges",
-                "--single-transaction",
-                str(source_file),
-            ]
-            _run_subprocess(
-                command,
-                error_message="数据库还原失败",
-                target_database=database,
-                tool_name="pg_restore",
-            )
+        database = _db_name_or_default(target_db_name)
+        execution = run_restore(database, source_file, allow_local_fallback=False)
 
-        set_task_status(task_id, "completed", stage="completed", message="restore completed", progress=100)
-    except HTTPException as exc:
+        set_task_status(
+            task_id,
+            "completed",
+            stage="completed",
+            message="restore completed",
+            progress=100,
+            metadata={
+                "toolVersion": execution.get("toolVersion", ""),
+                "serverVersion": execution.get("serverVersion", ""),
+                "strategy": execution.get("strategy"),
+                "selectedToolsImage": execution.get("selectedToolsImage"),
+                "fallbackUsed": bool(execution.get("fallbackUsed", False)),
+                "warnings": execution.get("warnings", []),
+            },
+        )
+    except DbError as exc:
         set_task_status(
             task_id,
             "failed",
             stage="failed",
             message="restore failed",
             progress=100,
-            error_code="DB_RESTORE_FAILED",
-            error_message=str(exc.detail),
+            error_code=exc.code or "PG_RESTORE_FAILED",
+            error_message=str(exc),
+            metadata=exc.context,
         )
     except Exception as exc:
         set_task_status(
@@ -193,7 +178,7 @@ def _run_db_restore_task(task_id: str, upload_file_id: str, target_db_name: str)
             stage="failed",
             message="restore failed",
             progress=100,
-            error_code="DB_RESTORE_FAILED",
+            error_code="PG_RESTORE_FAILED",
             error_message=str(exc),
         )
 
@@ -228,11 +213,39 @@ def api_create_db_backup(payload: dict[str, Any], admin: User = Depends(require_
     if fmt not in {"custom", "plain", "sql"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="format must be custom/plain/sql")
     db_name = str(payload.get("dbName", "")).strip()
+    database = _db_name_or_default(db_name)
+    preflight = resolve_execution_plan(database, allow_local_fallback=False).to_dict()
+    if not preflight.get("canProceed", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "errorCode": "PG_BACKUP_PREFLIGHT_FAILED",
+                "message": preflight.get("blockingReason") or "backup preflight failed",
+                "context": _convert_preflight_to_response(preflight),
+            },
+        )
 
-    task = create_task("db_backup", admin.username, metadata={"dbName": db_name, "format": fmt})
+    task = create_task(
+        "db_backup",
+        admin.username,
+        metadata={
+            "dbName": db_name,
+            "format": fmt,
+            **_convert_preflight_to_response(preflight),
+        },
+    )
     set_task_status(task["taskId"], "queued", stage="queued", message="backup queued", progress=1)
     threading.Thread(target=_run_db_backup_task, args=(task["taskId"], db_name, fmt), daemon=True).start()
     return _ok({"taskId": task["taskId"], "status": "queued"})
+
+
+@router.post("/backup/database/preflight")
+def api_backup_db_preflight(payload: dict[str, Any], admin: User = Depends(require_admin)):
+    del admin
+    db_name = str(payload.get("dbName", "")).strip()
+    database = _db_name_or_default(db_name)
+    preflight = resolve_execution_plan(database, allow_local_fallback=False).to_dict()
+    return _ok(_convert_preflight_to_response(preflight))
 
 
 @router.get("/backup/database/{task_id}/download")
@@ -304,11 +317,27 @@ def api_create_db_restore(payload: dict[str, Any], admin: User = Depends(require
     upload = get_db_restore_upload(upload_file_id)
     if upload is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="upload file not found")
+    database = _db_name_or_default(target_db_name)
+    preflight = resolve_execution_plan(database, allow_local_fallback=False).to_dict()
+    if not preflight.get("canProceed", False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "errorCode": "PG_RESTORE_PREFLIGHT_FAILED",
+                "message": preflight.get("blockingReason") or "restore preflight failed",
+                "context": _convert_preflight_to_response(preflight),
+            },
+        )
 
     task = create_task(
         "db_restore",
         admin.username,
-        metadata={"uploadFileId": upload_file_id, "targetDbName": target_db_name, "restoreMode": restore_mode},
+        metadata={
+            "uploadFileId": upload_file_id,
+            "targetDbName": target_db_name,
+            "restoreMode": restore_mode,
+            **_convert_preflight_to_response(preflight),
+        },
     )
     set_task_status(task["taskId"], "queued", stage="queued", message="restore queued", progress=1)
     threading.Thread(
@@ -317,6 +346,15 @@ def api_create_db_restore(payload: dict[str, Any], admin: User = Depends(require
         daemon=True,
     ).start()
     return _ok({"taskId": task["taskId"], "status": "queued"})
+
+
+@router.post("/restore/database/preflight")
+def api_restore_db_preflight(payload: dict[str, Any], admin: User = Depends(require_admin)):
+    del admin
+    target_db_name = str(payload.get("targetDbName", "")).strip()
+    database = _db_name_or_default(target_db_name)
+    preflight = resolve_execution_plan(database, allow_local_fallback=False).to_dict()
+    return _ok(_convert_preflight_to_response(preflight))
 
 
 @router.post("/backup/uploads/create-manifest")

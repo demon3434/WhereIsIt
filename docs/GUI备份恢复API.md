@@ -1,16 +1,17 @@
-# GUI 备份恢复 API（当前在线）
+# GUI 备份恢复 API（当前实现）
 
-更新时间：2026-04-16  
-适用版本：`demon3434/where_is_it:20260416`
+更新时间：2026-04-21  
+适用范围：当前仓库 `app/routers/gui_backup.py` 与 `app/services/db_executor.py`
 
 ## 1. 基础信息
 
 - Base URL：`http://<host>:3000`
 - 健康检查：`GET /api/health`
-- 认证方式：先登录拿 token，再用 `Authorization: Bearer <token>`
+- 认证方式：先登录，再携带 `Authorization: Bearer <token>`
 - 登录接口：`POST /api/auth/login`
+- GUI 备份恢复接口均要求管理员权限（`require_admin`）
 
-登录返回示例（envelope）：
+登录成功示例：
 
 ```json
 {
@@ -23,9 +24,9 @@
 }
 ```
 
-## 2. 通用返回格式
+## 2. 通用返回格式（Envelope）
 
-GUI 备份恢复接口统一返回 envelope：
+`/api/*` JSON 接口统一返回：
 
 ```json
 {
@@ -35,24 +36,90 @@ GUI 备份恢复接口统一返回 envelope：
 }
 ```
 
-完整清单与异常约定见 [API-Envelope接口文档.md](/E:/code/WhereIsIt/docs/API-Envelope接口文档.md)。
+说明：
+
+- 业务成功时通常 `code=0`
+- `FileResponse`（下载接口）不走 JSON envelope
+- 业务失败时，`message` 为错误说明，`data` 可能包含错误详情对象
 
 ## 3. 任务接口
 
-1. `GET /api/tasks`：任务列表  
-2. `GET /api/tasks/{taskId}`：任务详情  
-3. `POST /api/tasks/{taskId}/cancel`：请求取消任务
+### 3.1 查询任务列表
+
+- `GET /api/tasks`
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "items": [
+      {
+        "taskId": "task_20260421120101_abcd1234",
+        "taskType": "db_backup",
+        "status": "running",
+        "stage": "db_backup",
+        "createdAt": "2026-04-21T12:01:01Z",
+        "startedAt": "2026-04-21T12:01:02Z",
+        "finishedAt": null,
+        "createdBy": "admin",
+        "message": "exporting database",
+        "progress": { "percent": 10.0 },
+        "errorCode": null,
+        "errorMessage": null,
+        "metadata": {},
+        "cancelRequested": false
+      }
+    ]
+  }
+}
+```
+
+### 3.2 查询单任务
+
+- `GET /api/tasks/{taskId}`
+
+### 3.3 取消任务
+
+- `POST /api/tasks/{taskId}/cancel`
 
 说明：
-- `taskType` 常见值：`db_backup`、`db_restore`、`uploads_restore`
-- 任务状态存储在进程内存；服务重启后任务状态会清空
+
+- 常见 `taskType`：`db_backup`、`db_restore`、`uploads_restore`
+- 任务状态保存在进程内存，服务重启后会清空
 
 ## 4. 数据库备份/恢复（GUI）
 
-1. 创建数据库备份任务  
-`POST /api/backup/database`
+### 4.1 备份前置检查（推荐先调）
 
-请求体示例：
+- `POST /api/backup/database/preflight`
+
+请求示例：
+
+```json
+{
+  "dbName": ""
+}
+```
+
+响应 `data` 字段：
+
+- `serverVersion`：数据库版本文本，如 `16.8`
+- `serverVersionNum`：版本号整数，如 `160008`
+- `resolvedMajor`：主版本，如 `16`
+- `selectedStrategy`：`docker_exec|docker_run_tools|local|null`
+- `selectedToolsImage`：选中的工具镜像（可能为空）
+- `warnings`：警告列表（如 `UNTESTED_MAJOR_VERSION`）
+- `canProceed`：是否可继续
+- `blockingReason`：不可继续时原因
+
+### 4.2 创建数据库备份任务
+
+- `POST /api/backup/database`
+
+请求示例：
 
 ```json
 {
@@ -61,40 +128,145 @@ GUI 备份恢复接口统一返回 envelope：
 }
 ```
 
-2. 下载备份文件  
-`GET /api/backup/database/{taskId}/download`
+参数说明：
 
-3. 查询备份元数据  
-`GET /api/backup/database/{taskId}/metadata`
+- `format`：`custom|plain|sql`（`sql` 按 plain 处理）
+- `dbName`：可空，空则使用默认库
 
-4. 上传待恢复数据库文件  
-`POST /api/restore/database/upload`（`multipart/form-data`，字段名 `file`）
+行为说明：
 
-5. 创建恢复任务  
-`POST /api/restore/database`
+- 接口内部会先做 preflight
+- preflight 不通过时返回 400，错误码为 `PG_BACKUP_PREFLIGHT_FAILED`
 
-请求体示例：
+成功响应：
 
 ```json
 {
-  "uploadFileId": "dbupload_xxx",
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "taskId": "task_xxx",
+    "status": "queued"
+  }
+}
+```
+
+### 4.3 下载备份文件
+
+- `GET /api/backup/database/{taskId}/download`
+- 返回二进制文件流（`application/octet-stream`）
+
+### 4.4 查询备份文件元数据
+
+- `GET /api/backup/database/{taskId}/metadata`
+
+响应示例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "taskId": "task_xxx",
+    "fileName": "whereisit-db-backup-20260421-120101.dump",
+    "size": 123456,
+    "sha256": "....",
+    "metadata": {}
+  }
+}
+```
+
+### 4.5 上传待恢复数据库文件
+
+- `POST /api/restore/database/upload`
+- `multipart/form-data`，字段：`file`
+
+成功响应：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "uploadFileId": "upload_xxx",
+    "fileName": "backup.dump",
+    "size": 123456,
+    "sha256": "...."
+  }
+}
+```
+
+### 4.6 恢复前置检查（推荐先调）
+
+- `POST /api/restore/database/preflight`
+
+请求示例：
+
+```json
+{
+  "targetDbName": ""
+}
+```
+
+返回字段与备份 preflight 一致。
+
+### 4.7 创建数据库恢复任务
+
+- `POST /api/restore/database`
+
+请求示例：
+
+```json
+{
+  "uploadFileId": "upload_xxx",
   "targetDbName": "",
   "restoreMode": "drop_and_restore",
   "confirmText": "CONFIRM RESTORE"
 }
 ```
 
-数据库恢复说明：
-- `.sql` 文件走 `psql`
+参数说明：
+
+- `uploadFileId`：必填
+- `targetDbName`：可空，空则默认库
+- `restoreMode`：当前实现主要使用 `drop_and_restore`
+- `confirmText`：当 `restoreMode=drop_and_restore` 时必须为 `CONFIRM RESTORE`
+
+行为说明：
+
+- `.sql` 走 `psql`
 - 其他（如 `.dump`）走 `pg_restore`
-- 服务端会先检查 `pg_dump/pg_restore/psql` 主版本是否与目标数据库主版本一致，不一致会返回 `DB_BACKUP_FAILED` 或 `DB_RESTORE_FAILED`
+- 接口内部会先做 preflight
+- preflight 不通过时返回 400，错误码为 `PG_RESTORE_PREFLIGHT_FAILED`
 
-## 5. 图片备份/恢复（GUI）
+### 4.8 数据库工具版本策略（当前实现）
 
-1. 创建图片清单  
-`POST /api/backup/uploads/create-manifest`
+GUI 备份/恢复接口中，即使 `PG_EXEC_MODE=auto`，也只按顺序选择：
 
-请求体示例：
+1. `docker_exec`：在 PostgreSQL 容器内执行工具
+2. `docker_run_tools`：按主版本拉工具镜像执行
+
+说明：
+
+- GUI 链路已禁用 `local` 回退；前两种策略都不可用时会直接失败并返回 preflight 阻断原因
+- GUI 客户端不需要自带 `pg_dump/pg_restore/psql`
+
+### 4.9 常见数据库错误码
+
+- `PG_SERVER_VERSION_DETECT_FAILED`
+- `PG_BACKUP_PREFLIGHT_FAILED`
+- `PG_RESTORE_PREFLIGHT_FAILED`
+- `PG_TOOLS_IMAGE_NOT_FOUND`
+- `PG_DUMP_FAILED`
+- `PG_RESTORE_FAILED`
+
+## 5. 上传目录（图片）备份/恢复（GUI）
+
+### 5.1 创建上传清单
+
+- `POST /api/backup/uploads/create-manifest`
+
+请求示例：
 
 ```json
 {
@@ -105,19 +277,23 @@ GUI 备份恢复接口统一返回 envelope：
 ```
 
 说明：
-- `modifiedAfter` 支持 `null`
-- 清单里含 `manifestId`、`files[]`、`sha256`、`downloadUrl`
 
-2. 获取清单  
-`GET /api/backup/uploads/manifest/{manifestId}`
+- `modifiedAfter` 支持 `null` 或 ISO 时间
+- 返回包含 `manifestId`、`fileCount`、`totalBytes`、`files[]`
 
-3. 下载单文件  
-`GET /api/backup/uploads/file/{fileId}`
+### 5.2 获取清单
 
-4. 创建图片恢复任务  
-`POST /api/restore/uploads/create-task`
+- `GET /api/backup/uploads/manifest/{manifestId}`
 
-请求体示例：
+### 5.3 下载单文件
+
+- `GET /api/backup/uploads/file/{fileId}`
+
+### 5.4 创建上传恢复任务
+
+- `POST /api/restore/uploads/create-task`
+
+请求示例：
 
 ```json
 {
@@ -128,31 +304,51 @@ GUI 备份恢复接口统一返回 envelope：
 }
 ```
 
-5. 上传恢复文件  
-`POST /api/restore/uploads/{taskId}/upload-file`（`multipart/form-data`）
+`overwriteMode` 可选：
 
-字段：
-- `relativePath`
+- `skip_if_exists`
+- `overwrite_if_exists`
+- `overwrite_if_newer`（当前接口无远端 modifiedAt，行为接近 overwrite）
+
+### 5.5 上传恢复文件
+
+- `POST /api/restore/uploads/{taskId}/upload-file`
+- `multipart/form-data` 字段：
+- `relativePath`（必填）
 - `sha256`（可空）
 - `size`（可为 0）
-- `file`
+- `file`（必填）
 
-6. 完成恢复任务  
-`POST /api/restore/uploads/{taskId}/complete`
+返回 `data.status`：
 
-## 6. 管理端数据导入导出接口
+- `completed`
+- `skipped`
+- `failed`（校验失败）
 
-1. 数据库导出（dump）：`GET /api/admin/data/export/db`
-2. 数据库导入（dump/sql）：`POST /api/admin/data/import/db`
-3. 数据库导出（json）：`GET /api/admin/data/export/db-json`
-4. 数据库导入（json）：`POST /api/admin/data/import/db-json`
-5. 图片清单导出：`GET /api/admin/data/export/images/manifest`
-6. 单图下载：`GET /api/admin/data/export/images/download?path=...`
-7. 图片导入：`POST /api/admin/data/import/images`
+### 5.6 完成上传恢复任务
 
-## 7. C# 客户端调用要点
+- `POST /api/restore/uploads/{taskId}/complete`
 
-1. 先调 `/api/auth/login`，从 `data.access_token` 取 token  
-2. 所有 GUI 接口都带 `Authorization: Bearer <token>`  
-3. `modifiedAfter` 可传 `null`  
-4. 恢复数据库时若报版本不匹配，请用与数据库同主版本的 `pg_dump` 重新导出备份文件  
+成功后返回 `summary`（`completed/skipped/failed/uploadedBytes`）。
+
+## 6. 建议调用顺序（GUI）
+
+数据库备份：
+
+1. `POST /api/backup/database/preflight`
+2. `POST /api/backup/database`
+3. 轮询 `GET /api/tasks/{taskId}`
+4. 成功后 `GET /api/backup/database/{taskId}/download`
+
+数据库恢复：
+
+1. `POST /api/restore/database/upload`
+2. `POST /api/restore/database/preflight`
+3. `POST /api/restore/database`
+4. 轮询 `GET /api/tasks/{taskId}`
+
+上传目录恢复：
+
+1. `POST /api/restore/uploads/create-task`
+2. 多次调用 `POST /api/restore/uploads/{taskId}/upload-file`
+3. `POST /api/restore/uploads/{taskId}/complete`

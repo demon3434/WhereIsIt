@@ -20,6 +20,7 @@ from ..config import settings
 from ..database import Base, engine
 from ..deps import require_admin
 from ..models import User
+from ..services.db_executor import DbError, run_backup, run_restore
 from ..services.storage import ensure_upload_dir
 
 router = APIRouter(prefix="/api/admin/data", tags=["数据管理"])
@@ -286,29 +287,23 @@ def _write_upload_to_temp_file(upload: UploadFile, suffix: str = "") -> str:
 @router.get("/export/db")
 def export_database_fast(admin: User = Depends(require_admin)):
     del admin
-    host, port, user, _, database = _db_conn_info()
+    _, _, _, _, database = _db_conn_info()
 
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".dump")
     backup_path = temp.name
     temp.close()
 
-    command = [
-        "pg_dump",
-        "-h",
-        host,
-        "-p",
-        port,
-        "-U",
-        user,
-        "-d",
-        database,
-        "-Fc",
-        "--no-owner",
-        "--no-privileges",
-        "-f",
-        backup_path,
-    ]
-    _run_subprocess(command, error_message="高性能数据库导出失败", target_database=database, tool_name="pg_dump")
+    try:
+        run_backup(database, "custom", Path(backup_path))
+    except DbError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "errorCode": exc.code,
+                "message": str(exc),
+                "context": exc.context,
+            },
+        ) from exc
 
     filename = f"whereisit-db-backup-{datetime.utcnow().strftime('%Y%m%d-%H%M%S')}.dump"
     return FileResponse(
@@ -328,49 +323,18 @@ async def import_database_fast(file: UploadFile = File(...), admin: User = Depen
     suffix = Path(file.filename).suffix.lower()
     temp_path = _write_upload_to_temp_file(file, suffix=suffix)
 
-    host, port, user, _, database = _db_conn_info()
+    _, _, _, _, database = _db_conn_info()
     try:
-        if suffix == ".sql":
-            command = [
-                "psql",
-                "-h",
-                host,
-                "-p",
-                port,
-                "-U",
-                user,
-                "-d",
-                database,
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-f",
-                temp_path,
-            ]
-            _run_subprocess(command, error_message="SQL 备份导入失败", target_database=database, tool_name="psql")
-        else:
-            command = [
-                "pg_restore",
-                "-h",
-                host,
-                "-p",
-                port,
-                "-U",
-                user,
-                "-d",
-                database,
-                "--clean",
-                "--if-exists",
-                "--no-owner",
-                "--no-privileges",
-                "--single-transaction",
-                temp_path,
-            ]
-            _run_subprocess(
-                command,
-                error_message="高性能数据库还原失败",
-                target_database=database,
-                tool_name="pg_restore",
-            )
+        run_restore(database, Path(temp_path))
+    except DbError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "errorCode": exc.code,
+                "message": str(exc),
+                "context": exc.context,
+            },
+        ) from exc
     finally:
         Path(temp_path).unlink(missing_ok=True)
 

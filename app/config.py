@@ -33,6 +33,12 @@ class Settings(BaseSettings):
     service_discovery_name: str = "WhereIsIt"
     service_advertise_host: str = ""
     service_advertise_port: int = 0
+    pg_exec_mode: str = "auto"
+    pg_container_name: str = "whereisit-postgres"
+    pg_service_name: str = "db"
+    pg_tools_image_template: str = "postgres:{major}-alpine"
+    pg_tools_image_fallback_template: str = "postgres:{major}"
+    pg_tested_max_major: int = 17
 
     model_config = SettingsConfigDict(
         env_file=".env",

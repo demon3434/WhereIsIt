@@ -1,6 +1,9 @@
 services:
   db:
-    image: docker.m.daocloud.io/library/postgres:16-alpine
+    # PostgreSQL 服务镜像（可通过 .env 的 PG_IMAGE 切换主版本）
+    image: ${PG_IMAGE:-docker.m.daocloud.io/library/postgres:16-alpine}
+    # PostgreSQL 容器名称（供备份恢复 docker_exec / docker_run_tools 模式定位）
+    container_name: ${PG_CONTAINER_NAME:-whereisit-postgres}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
@@ -20,12 +23,28 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        # 与 db 服务使用同一 PG_IMAGE，确保 app 内 pg_dump/pg_restore 主版本一致
+        PG_IMAGE: ${PG_IMAGE:-docker.m.daocloud.io/library/postgres:16-alpine}
     image: whereisit:latest
     restart: unless-stopped
     env_file:
       - .env
     environment:
+      # 服务对外通告地址（未设置时 compose 直接报错）
       SERVICE_ADVERTISE_HOST: ${SERVICE_ADVERTISE_HOST:?please set SERVICE_ADVERTISE_HOST in .env}
+      # 备份恢复执行模式：auto|docker_exec|docker_run_tools|local
+      PG_EXEC_MODE: ${PG_EXEC_MODE:-auto}
+      # PostgreSQL 容器名（与 db.container_name 保持一致）
+      PG_CONTAINER_NAME: ${PG_CONTAINER_NAME:-whereisit-postgres}
+      # PostgreSQL 服务名（用于按 compose label 回查容器）
+      PG_SERVICE_NAME: ${PG_SERVICE_NAME:-db}
+      # 工具镜像模板（{major} 由运行时探测结果替换）
+      PG_TOOLS_IMAGE_TEMPLATE: ${PG_TOOLS_IMAGE_TEMPLATE:-postgres:{major}-alpine}
+      # 工具镜像回退模板（主模板拉取失败时尝试）
+      PG_TOOLS_IMAGE_FALLBACK_TEMPLATE: ${PG_TOOLS_IMAGE_FALLBACK_TEMPLATE:-postgres:{major}}
+      # 已验证最大主版本（更高版本仅告警不阻断）
+      PG_TESTED_MAX_MAJOR: ${PG_TESTED_MAX_MAJOR:-17}
     ports:
       - "${WEB_PORT:-3000}:3000"
     depends_on:
@@ -33,6 +52,10 @@ services:
         condition: service_healthy
     volumes:
       - /opt/docker/whereisit/data/uploads:/data/uploads
+      # 允许应用容器调用宿主 Docker（执行 docker exec / docker run）
+      - /var/run/docker.sock:/var/run/docker.sock
+      # 挂载宿主 docker CLI（Debian 13 的 docker.io 包在容器内可能无 docker 命令）
+      - /usr/bin/docker:/usr/local/bin/docker:ro
     networks:
       - whereisit_mdns
 
