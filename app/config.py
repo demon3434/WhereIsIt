@@ -39,6 +39,44 @@ class Settings(BaseSettings):
     pg_tools_image_template: str = "postgres:{major}-alpine"
     pg_tools_image_fallback_template: str = "postgres:{major}"
     pg_tested_max_major: int = 17
+    voice_search_enabled: bool = True
+    voice_search_mock_final: bool = False
+    voice_search_mock_stream: bool = False
+    voice_terms_index_delay_seconds: int = 300
+    voice_terms_index_poll_seconds: int = 30
+    voice_terms_index_batch_size: int = 50
+    voice_stream_sample_rate: int = 16000
+    voice_stream_channels: int = 1
+    voice_stream_max_seconds: int = 15
+    voice_stream_partial_interval_ms: int = 150
+    voice_offline_timeout_ms: int = 3000
+    voice_session_ttl_seconds: int = 300
+    voice_hotwords_enabled: bool = True
+    voice_asr_engine: str = "faster_whisper"
+    voice_stream_engine: str = "sherpa_onnx"
+    voice_offline_engine: str = "funasr"
+    voice_stream_model_size: str = "tiny"
+    voice_offline_model_size: str = "small"
+    voice_model_device: str = "cpu"
+    voice_model_compute_type: str = "int8"
+    voice_model_num_threads: int = 2
+    voice_model_download_root: str = "/data/voice-models"
+    voice_cleaning_lexicon_dir: str = "/data/voice-cleaning-lexicon"
+    voice_sherpa_provider: str = "cpu"
+    voice_sherpa_hf_repo: str = "csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en"
+    voice_sherpa_model_url: str = (
+        "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/"
+        "sherpa-onnx-streaming-paraformer-bilingual-zh-en.tar.bz2"
+    )
+    voice_sherpa_model_dir: str = ""
+    voice_sherpa_tokens_file: str = "tokens.txt"
+    voice_sherpa_encoder_file: str = "encoder.int8.onnx"
+    voice_sherpa_decoder_file: str = "decoder.int8.onnx"
+    voice_funasr_model: str = "paraformer-zh"
+    voice_funasr_vad_model: str = "fsmn-vad"
+    voice_funasr_punc_model: str = ""
+    voice_funasr_hub: str = "ms"
+    voice_mock_final_text: str = "__VOICE_DEBUG_PLACEHOLDER__"
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -52,6 +52,7 @@ services:
         condition: service_healthy
     volumes:
       - /opt/docker/whereisit/data/uploads:/data/uploads
+      - /opt/docker/whereisit/data/voice-models:/data/voice-models
       # 允许应用容器调用宿主 Docker（执行 docker exec / docker run）
       - /var/run/docker.sock:/var/run/docker.sock
       # 挂载宿主 docker CLI（Debian 13 的 docker.io 包在容器内可能无 docker 命令）

@@ -13,6 +13,7 @@ from ..deps import get_current_user
 from ..models import Category, House, Item, ItemImage, Location, OperationLog, Tag, User, item_tags
 from ..schemas import ItemIn, ItemOut, MessageOut, PaginatedItemsOut
 from ..services.storage import save_upload_file
+from ..services.voice_search import delete_item_voice_terms, mark_item_voice_terms_dirty
 
 router = APIRouter(prefix="/api/items", tags=["物品"])
 
@@ -241,6 +242,7 @@ def create_item(
     item.tags = tags
     db.add(item)
     db.flush()
+    mark_item_voice_terms_dirty(item)
 
     for f in files:
         filename, url = save_upload_file(f, current_user.id, item.id)
@@ -278,6 +280,8 @@ def update_item(
     item.category_id = payload.category_id
     item.location_id = location.id
     item.tags = tags
+    db.flush()
+    mark_item_voice_terms_dirty(item)
 
     for f in files:
         filename, url = save_upload_file(f, current_user.id, item.id)
@@ -294,6 +298,7 @@ def delete_item(item_id: int, db: Session = Depends(get_db), current_user: User 
     item = db.scalar(query_base(current_user).where(Item.id == item_id))
     if not item:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="物品不存在")
+    delete_item_voice_terms(db, item.id)
     for image in item.images:
         file_path = Path(settings.upload_dir) / image.filename
         if file_path.exists():

@@ -8,3 +8,7 @@ trim_trailing_whitespace = true
 
 [*.md]
 trim_trailing_whitespace = false
+
+# Project conventions (non-formatting, for team alignment):
+# - All JSON APIs under /api/* must use envelope response style.
+# - Envelope shape: {"code": <int>, "message": "<string>", "data": <any>}

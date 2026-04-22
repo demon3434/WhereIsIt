@@ -11,16 +11,24 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 
 from .auth import hash_password
 from .config import settings
 from .database import Base, SessionLocal, engine
 from .deps import get_current_user_optional
-from .models import House, User
-from .routers import admin_users, auth, categories, data_management, gui_backup, houses, items, rooms, tags, users
+from .models import House, Item, User, VoiceSearchTerm
+from .routers import admin_users, auth, categories, data_management, gui_backup, houses, items, rooms, tags, users, voice_search
 from .services.mdns import ServiceDiscoveryBroadcaster
 from .services.storage import ensure_upload_dir
+from .services.voice_search import (
+    ensure_voice_cleaning_lexicon_files,
+    get_offline_asr_service,
+    get_streaming_asr_service,
+    mark_all_items_voice_terms_dirty,
+    start_voice_term_index_worker,
+    stop_voice_term_index_worker,
+)
 
 app = FastAPI(title="WhereIsIt", version="1.0.0")
 broadcaster = ServiceDiscoveryBroadcaster()
@@ -138,6 +146,7 @@ async def on_startup():
     Base.metadata.create_all(bind=engine)
     run_postgres_migrations()
     ensure_upload_dir()
+    ensure_voice_cleaning_lexicon_files()
     db = SessionLocal()
     try:
         exists = db.scalar(select(User).where(User.username == settings.default_admin_username))
@@ -164,6 +173,10 @@ async def on_startup():
         exists.accessible_houses = active_houses
         if exists.default_house_id and exists.default_house_id not in {house.id for house in active_houses}:
             exists.default_house_id = None
+        item_count = db.scalar(select(func.count()).select_from(Item)) or 0
+        indexed_item_count = db.scalar(select(func.count(func.distinct(VoiceSearchTerm.item_id))).select_from(VoiceSearchTerm)) or 0
+        if item_count > 0 and indexed_item_count != item_count:
+            mark_all_items_voice_terms_dirty(db)
         db.commit()
     finally:
         db.close()
@@ -171,10 +184,15 @@ async def on_startup():
         await asyncio.to_thread(broadcaster.start)
     except Exception:
         logger.exception("mDNS startup failed, service discovery disabled for this run")
+    start_voice_term_index_worker()
+    if settings.voice_search_enabled:
+        asyncio.create_task(asyncio.to_thread(get_streaming_asr_service().warmup), name="voice-stream-warmup")
+        asyncio.create_task(asyncio.to_thread(get_offline_asr_service().warmup), name="voice-offline-warmup")
 
 
 @app.on_event("shutdown")
 async def on_shutdown():
+    await stop_voice_term_index_worker()
     try:
         await asyncio.to_thread(broadcaster.stop)
     except Exception:
@@ -192,6 +210,7 @@ app.include_router(tags.router)
 app.include_router(houses.router)
 app.include_router(rooms.router)
 app.include_router(items.router)
+app.include_router(voice_search.router)
 app.include_router(data_management.router)
 app.include_router(gui_backup.router)
 
@@ -301,10 +320,38 @@ END $$""",
         "ALTER TABLE IF EXISTS locations ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
         "ALTER TABLE IF EXISTS items ADD COLUMN IF NOT EXISTS location_detail TEXT NOT NULL DEFAULT ''",
         "ALTER TABLE IF EXISTS items ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW()",
+        "ALTER TABLE IF EXISTS items ADD COLUMN IF NOT EXISTS voice_terms_dirty_at TIMESTAMP NULL",
+        "ALTER TABLE IF EXISTS items ADD COLUMN IF NOT EXISTS voice_terms_last_indexed_at TIMESTAMP NULL",
         "ALTER TABLE IF EXISTS items DROP COLUMN IF EXISTS notes",
         "ALTER TABLE IF EXISTS items DROP COLUMN IF EXISTS purchase_date",
         "ALTER TABLE IF EXISTS items DROP COLUMN IF EXISTS price",
         "ALTER TABLE IF EXISTS item_images ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT NOW()",
+        """CREATE TABLE IF NOT EXISTS voice_search_terms (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+          item_id INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          term VARCHAR(120) NOT NULL,
+          term_type VARCHAR(20) NOT NULL,
+          weight INTEGER NOT NULL DEFAULT 0,
+          created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+        )""",
+        """DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'uq_voice_search_term_item_term'
+  ) THEN
+    ALTER TABLE voice_search_terms
+      ADD CONSTRAINT uq_voice_search_term_item_term
+      UNIQUE (user_id, item_id, term, term_type);
+  END IF;
+END $$""",
+        "CREATE INDEX IF NOT EXISTS ix_voice_search_terms_user_id ON voice_search_terms(user_id)",
+        "CREATE INDEX IF NOT EXISTS ix_voice_search_terms_item_id ON voice_search_terms(item_id)",
+        "CREATE INDEX IF NOT EXISTS ix_voice_search_terms_term_type ON voice_search_terms(term_type)",
+        "CREATE INDEX IF NOT EXISTS ix_voice_search_terms_term ON voice_search_terms(term)",
+        "CREATE INDEX IF NOT EXISTS ix_items_voice_terms_dirty_at ON items(voice_terms_dirty_at)",
         """DO $$
 BEGIN
   IF EXISTS (

@@ -117,6 +117,8 @@ class Item(Base):
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    voice_terms_dirty_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    voice_terms_last_indexed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     owner: Mapped["User"] = relationship(back_populates="items")
     category: Mapped["Category | None"] = relationship(back_populates="items")
@@ -135,6 +137,22 @@ class ItemImage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     item: Mapped["Item"] = relationship(back_populates="images")
+
+
+class VoiceSearchTerm(Base):
+    __tablename__ = "voice_search_terms"
+    __table_args__ = (
+        UniqueConstraint("user_id", "item_id", "term", "term_type", name="uq_voice_search_term_item_term"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), index=True)
+    term: Mapped[str] = mapped_column(String(120), index=True)
+    term_type: Mapped[str] = mapped_column(String(20), index=True)
+    weight: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class OperationLog(Base):
