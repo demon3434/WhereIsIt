@@ -179,11 +179,3 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
-
-# Project local data / temp
-data/
-.tmp/
-tmp_voice_cleaning_lexicon_test/
-
-# Deployment / local-only files
-服务器部署信息.txt

@@ -23,6 +23,7 @@ const state = {
   pendingFiles: [],
   selectedItemTags: [],
   editPendingFiles: [],
+  editImageEntries: [],
   editRemovedImageIds: [],
   selectedEditItemTags: [],
   houseInlineEdit: null,
@@ -47,6 +48,8 @@ const state = {
   userPage: 1,
   userPageSize: 10,
   adminAvailableOpen: false,
+  activeSortContainerId: "",
+  activeSortBadgeSnapshot: null,
 };
 
 const byId = (id) => document.getElementById(id);
@@ -88,6 +91,7 @@ const confirmOkBtn = byId("confirmOkBtn");
 
 let previewScale = 1;
 const MAX_IMAGES_PER_ITEM = 9;
+const IMAGE_LONG_PRESS_MS = 220;
 const UPLOAD_IMAGE_MAX_BYTES = 900 * 1024;
 const UPLOAD_IMAGE_MAX_LONG_EDGE = 1600;
 const UPLOAD_IMAGE_MIN_LONG_EDGE = 720;
@@ -98,6 +102,231 @@ const UPLOAD_IMAGE_SCALE_STEP = 0.85;
 
 function toast(msg) {
   window.alert(msg);
+}
+
+function createFileKey(prefix = "img") {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function reorderList(list, fromIndex, toIndex) {
+  if (fromIndex === toIndex || fromIndex < 0 || toIndex < 0) return [...list];
+  const next = [...list];
+  const [moved] = next.splice(fromIndex, 1);
+  if (!moved) return next;
+  next.splice(toIndex, 0, moved);
+  return next;
+}
+
+function animateSortableReflow(container, previousRects) {
+  if (!container || !previousRects) return;
+  container.querySelectorAll(".sortable-image-card").forEach((card) => {
+    const key = card.dataset.sortKey || card.dataset.index || "";
+    const prevRect = previousRects.get(key);
+    if (!prevRect) return;
+    const nextRect = card.getBoundingClientRect();
+    const deltaX = prevRect.left - nextRect.left;
+    const deltaY = prevRect.top - nextRect.top;
+    if (Math.abs(deltaX) < 1 && Math.abs(deltaY) < 1) return;
+    card.animate(
+      [
+        { transform: `translate(${deltaX}px, ${deltaY}px)` },
+        { transform: "translate(0, 0)" },
+      ],
+      {
+        duration: 220,
+        easing: "cubic-bezier(0.22, 1, 0.36, 1)",
+      }
+    );
+  });
+}
+
+function getSortableCardKey(item, index) {
+  if (!item) return `idx-${index}`;
+  if (item.fileKey) return `file-${item.fileKey}`;
+  if (item.imageId) return `img-${item.imageId}`;
+  if (item.id) return `id-${item.id}`;
+  if (item.url) return `url-${item.url}`;
+  return `idx-${index}`;
+}
+
+function getSortableBadgeLabel(containerId, item, index) {
+  const currentOrder = index + 1;
+  if (!containerId || state.activeSortContainerId !== containerId || !state.activeSortBadgeSnapshot) {
+    return `#${currentOrder}`;
+  }
+  const frozenOrder = state.activeSortBadgeSnapshot[getSortableCardKey(item, index)];
+  return `#${Number.isFinite(frozenOrder) ? frozenOrder : currentOrder}`;
+}
+
+function bindLongPressSortable(container, getItems, setItems, render) {
+  if (!container) return;
+
+  if (!container.dataset.sortableBound) {
+    container.dataset.sortableBound = "1";
+    container.addEventListener(
+      "dragstart",
+      (e) => {
+        e.preventDefault();
+      },
+      true
+    );
+    container.addEventListener(
+      "click",
+      (e) => {
+        if (container.dataset.suppressClick === "1") {
+          e.preventDefault();
+          e.stopPropagation();
+          container.dataset.suppressClick = "";
+        }
+      },
+      true
+    );
+  }
+
+  let pressTimer = null;
+  let pressedIndex = -1;
+  let draggingIndex = -1;
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let lastX = 0;
+  let lastY = 0;
+  let pointerOffsetX = 0;
+  let pointerOffsetY = 0;
+  let ghostCard = null;
+
+  const snapshotRects = () =>
+    new Map(
+      [...container.querySelectorAll(".sortable-image-card")].map((card) => [
+        card.dataset.sortKey || card.dataset.index || "",
+        card.getBoundingClientRect(),
+      ])
+    );
+
+  const updateGhostPosition = (clientX, clientY) => {
+    if (!ghostCard) return;
+    ghostCard.style.left = `${clientX - pointerOffsetX}px`;
+    ghostCard.style.top = `${clientY - pointerOffsetY}px`;
+  };
+
+  const syncDragVisual = () => {
+    container.classList.toggle("is-sorting", dragging);
+    container
+      .querySelectorAll(".sortable-image-card.is-dragging, .sortable-image-card.is-pressing, .sortable-image-card.is-drag-placeholder")
+      .forEach((node) => node.classList.remove("is-dragging", "is-pressing", "is-drag-placeholder"));
+    if (!dragging || draggingIndex < 0) return;
+    const activeCard = container.querySelector(`.sortable-image-card[data-index="${draggingIndex}"]`);
+    activeCard?.classList.add("is-drag-placeholder", "is-pressing");
+  };
+
+  const createGhostCard = (card, clientX, clientY) => {
+    const rect = card.getBoundingClientRect();
+    pointerOffsetX = clientX - rect.left;
+    pointerOffsetY = clientY - rect.top;
+    ghostCard?.remove();
+    ghostCard = card.cloneNode(true);
+    ghostCard.classList.remove("is-dragging", "is-pressing", "is-drag-placeholder");
+    ghostCard.classList.add("sortable-drag-ghost");
+    ghostCard.style.width = `${rect.width}px`;
+    ghostCard.style.height = `${rect.height}px`;
+    document.body.appendChild(ghostCard);
+    updateGhostPosition(clientX, clientY);
+  };
+
+  const clearTimer = () => {
+    if (pressTimer) {
+      clearTimeout(pressTimer);
+      pressTimer = null;
+    }
+  };
+
+  const clearDraggingStyle = () => {
+    container.classList.remove("is-sorting");
+    container
+      .querySelectorAll(".sortable-image-card.is-dragging, .sortable-image-card.is-pressing, .sortable-image-card.is-drag-placeholder")
+      .forEach((node) => node.classList.remove("is-dragging", "is-pressing", "is-drag-placeholder"));
+    ghostCard?.remove();
+    ghostCard = null;
+  };
+
+  const finish = (suppressClick = false) => {
+    const wasDragging = dragging;
+    clearTimer();
+    document.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointerup", onPointerUp);
+    document.removeEventListener("pointercancel", onPointerUp);
+    if (dragging && suppressClick) container.dataset.suppressClick = "1";
+    if (state.activeSortContainerId === container.id) {
+      state.activeSortContainerId = "";
+      state.activeSortBadgeSnapshot = null;
+    }
+    dragging = false;
+    pressedIndex = -1;
+    draggingIndex = -1;
+    clearDraggingStyle();
+    if (wasDragging) render();
+  };
+
+  const onPointerMove = (e) => {
+    if (pressedIndex < 0) return;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    if (!dragging) {
+      const movedDistance = Math.hypot(e.clientX - startX, e.clientY - startY);
+      if (movedDistance > 6) {
+        clearTimer();
+      }
+      return;
+    }
+    e.preventDefault();
+    updateGhostPosition(e.clientX, e.clientY);
+
+    const hoverCard =
+      e.target.closest(".sortable-image-card") || document.elementFromPoint(e.clientX, e.clientY)?.closest(".sortable-image-card");
+    if (!hoverCard || !container.contains(hoverCard)) return;
+    const hoverIndex = Number(hoverCard.dataset.index);
+    if (!Number.isFinite(hoverIndex) || hoverIndex < 0 || hoverIndex === draggingIndex) return;
+    const previousRects = snapshotRects();
+    const nextItems = reorderList(getItems(), draggingIndex, hoverIndex);
+    setItems(nextItems);
+    draggingIndex = hoverIndex;
+    render();
+    syncDragVisual();
+    animateSortableReflow(container, previousRects);
+    updateGhostPosition(e.clientX, e.clientY);
+  };
+
+  const onPointerUp = () => finish(true);
+
+  container.onpointerdown = (e) => {
+    const card = e.target.closest(".sortable-image-card");
+    if (!card || !container.contains(card)) return;
+    if (e.target.closest("button")) return;
+
+    pressedIndex = Number(card.dataset.index);
+    draggingIndex = pressedIndex;
+    startX = e.clientX;
+    startY = e.clientY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    clearTimer();
+    pressTimer = window.setTimeout(() => {
+      dragging = true;
+      state.activeSortContainerId = container.id || "";
+      state.activeSortBadgeSnapshot = Object.fromEntries(
+        getItems().map((item, index) => [getSortableCardKey(item, index), index + 1])
+      );
+      createGhostCard(card, lastX, lastY);
+      syncDragVisual();
+    }, IMAGE_LONG_PRESS_MS);
+    document.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+    document.addEventListener("pointercancel", onPointerUp);
+  };
+
+  container.onpointerleave = () => {
+    if (!dragging) clearTimer();
+  };
 }
 
 function clampUploadQuality(value) {
@@ -598,8 +827,9 @@ function renderPendingFiles() {
   const box = byId("pendingImagePreview");
   box.innerHTML = state.pendingFiles
     .map(
-      (it, i) => `<div class="thumb-card">
-      <img class="thumb thumb-43" src="${it.previewUrl}" alt="待上传图片" />
+      (it, i) => `<div class="thumb-card sortable-image-card" data-index="${i}" data-sort-key="${escapeHtml(getSortableCardKey(it, i))}">
+      <span class="image-order-badge">${getSortableBadgeLabel("pendingImagePreview", it, i)}</span>
+      <img class="thumb thumb-43" src="${it.previewUrl}" alt="待上传图片" draggable="false" />
       <button class="thumb-delete" type="button" data-index="${i}" aria-label="删除图片"></button>
     </div>`
     )
@@ -612,6 +842,14 @@ function renderPendingFiles() {
     state.pendingFiles.splice(index, 1);
     renderPendingFiles();
   };
+  bindLongPressSortable(
+    box,
+    () => state.pendingFiles,
+    (nextItems) => {
+      state.pendingFiles = nextItems;
+    },
+    renderPendingFiles
+  );
   bindImagePreview();
 }
 
@@ -626,7 +864,13 @@ async function handleItemFileChange(e) {
   const selected = files.slice(0, remain);
   try {
     const compressed = await compressFilesForUpload(selected);
-    compressed.forEach((f) => state.pendingFiles.push({ file: f, previewUrl: URL.createObjectURL(f) }));
+    compressed.forEach((f) =>
+      state.pendingFiles.push({
+        file: f,
+        fileKey: createFileKey("create"),
+        previewUrl: URL.createObjectURL(f),
+      })
+    );
     if (files.length > remain) toast(`最多上传 ${MAX_IMAGES_PER_ITEM} 张图片，已忽略超出部分`);
   } catch (err) {
     toast(err.message || "图片压缩失败");
@@ -635,41 +879,19 @@ async function handleItemFileChange(e) {
   renderPendingFiles();
 }
 
-function renderEditPendingFiles() {
-  const countEl = byId("itemEditFilesCount");
-  const box = byId("itemEditPendingPreview");
-  if (!countEl || !box) return;
-  countEl.textContent = `已选 ${state.editPendingFiles.length} 张新图片`;
-  box.innerHTML = state.editPendingFiles
-    .map(
-      (it, i) => `<div class="thumb-card">
-      <img class="thumb thumb-43" src="${it.previewUrl}" alt="待上传图片" />
-      <button class="thumb-delete" type="button" data-index="${i}" aria-label="删除图片"></button>
-    </div>`
-    )
-    .join("");
-  box.onclick = (e) => {
-    const btn = e.target.closest("button[data-index]");
-    if (!btn) return;
-    const index = Number(btn.dataset.index);
-    URL.revokeObjectURL(state.editPendingFiles[index].previewUrl);
-    state.editPendingFiles.splice(index, 1);
-    renderEditPendingFiles();
-  };
-  bindImagePreview();
-}
-
 function clearEditPendingFiles() {
-  state.editPendingFiles.forEach((x) => URL.revokeObjectURL(x.previewUrl));
+  state.editImageEntries
+    .filter((entry) => entry.kind === "new")
+    .forEach((entry) => URL.revokeObjectURL(entry.previewUrl));
   state.editPendingFiles = [];
+  state.editImageEntries = [];
   if (byId("itemEditFiles")) byId("itemEditFiles").value = "";
-  renderEditPendingFiles();
+  renderEditImageEntries();
 }
 
 async function handleEditItemFileChange(e) {
   const files = [...(e.target.files || [])];
-  const currentCount = byId("itemEditCurrentImages")?.querySelectorAll("img.thumb").length || 0;
-  const remain = MAX_IMAGES_PER_ITEM - currentCount - state.editPendingFiles.length;
+  const remain = MAX_IMAGES_PER_ITEM - state.editImageEntries.length;
   if (remain <= 0) {
     toast("图片最多 9 张");
     e.target.value = "";
@@ -678,13 +900,22 @@ async function handleEditItemFileChange(e) {
   const selected = files.slice(0, remain);
   try {
     const compressed = await compressFilesForUpload(selected);
-    compressed.forEach((f) => state.editPendingFiles.push({ file: f, previewUrl: URL.createObjectURL(f) }));
+    compressed.forEach((f) => {
+      const previewUrl = URL.createObjectURL(f);
+      state.editImageEntries.push({
+        kind: "new",
+        file: f,
+        fileKey: createFileKey("edit"),
+        previewUrl,
+        url: previewUrl,
+      });
+    });
     if (files.length > remain) toast(`最多上传 ${MAX_IMAGES_PER_ITEM} 张图片，已忽略超出部分`);
   } catch (err) {
     toast(err.message || "图片压缩失败");
   }
   e.target.value = "";
-  renderEditPendingFiles();
+  renderEditImageEntries();
 }
 
 function confirmDeleteModal({ title, summary, details }) {
@@ -1658,17 +1889,18 @@ function openItemDetailDialog(item) {
 function openItemPhotosDialog(item) {
   if (!itemPhotosDialog) return;
   const box = byId("itemPhotosContent");
-  const list = item.images || [];
+  const list = [...(item.images || [])].sort((a, b) => (Number(a.display_order || 0) - Number(b.display_order || 0)) || (a.id - b.id));
   if (!list.length) {
     box.innerHTML = "<p>暂无照片</p>";
   } else {
     box.innerHTML = list
       .map(
-        (img) => `<div class="photo-thumb-card">
+        (img, index) => `<div class="photo-thumb-card">
+          <span class="image-order-badge">#${index + 1}</span>
           <button type="button" class="photo-thumb-btn" data-full-url="${escapeHtml(img.url)}" data-alt="${escapeHtml(item.name || "图片")}">
-            <img class="thumb thumb-43" src="${img.url}" alt="${escapeHtml(item.name || "图片")}" data-full-url="${escapeHtml(img.url)}" />
+            <img class="thumb thumb-43" src="${img.url}" alt="${escapeHtml(item.name || "图片")}" data-full-url="${escapeHtml(img.url)}" draggable="false" />
           </button>
-          <div class="photo-meta">上传时间：\n${escapeHtml(formatDateTime(img.created_at, true))}</div>
+          <div class="photo-meta">上传时间：${escapeHtml(formatDateTime(img.created_at, true))}</div>
         </div>`
       )
       .join("");
@@ -1681,27 +1913,44 @@ function openItemPhotosDialog(item) {
   itemPhotosDialog.showModal();
 }
 
-function renderEditCurrentImages(item) {
-  const box = byId("itemEditCurrentImages");
-  if (!box) return;
-  const removed = new Set(state.editRemovedImageIds.map((x) => Number(x)));
-  const list = (item.images || []).filter((img) => !removed.has(Number(img.id)));
-  box.innerHTML = list
+function renderEditImageEntries() {
+  const countEl = byId("itemEditFilesCount");
+  const box = byId("itemEditImageSorter");
+  if (!countEl || !box) return;
+  countEl.textContent = `当前共 ${state.editImageEntries.length} 张图片`;
+  box.innerHTML = state.editImageEntries
     .map(
-      (img) => `<div class="thumb-card" data-image-id="${img.id}">
-        <img class="thumb" src="${img.url}" alt="现有图片" data-full-url="${img.url}" />
-        <button type="button" class="thumb-delete old-image-delete" data-image-id="${img.id}" aria-label="删除图片"></button>
+      (entry, index) => `<div class="thumb-card sortable-image-card" data-index="${index}" data-sort-key="${escapeHtml(getSortableCardKey(entry, index))}">
+        <span class="image-order-badge">${getSortableBadgeLabel("itemEditImageSorter", entry, index)}</span>
+        <img class="thumb thumb-43" src="${entry.previewUrl || entry.url}" alt="${entry.kind === "existing" ? "现有图片" : "待上传图片"}" data-full-url="${entry.previewUrl || entry.url}" draggable="false" />
+        <button type="button" class="thumb-delete old-image-delete" data-index="${index}" aria-label="删除图片"></button>
       </div>`
     )
     .join("");
   box.onclick = (e) => {
-    const delBtn = e.target.closest(".old-image-delete[data-image-id]");
+    const delBtn = e.target.closest(".old-image-delete[data-index]");
     if (!delBtn) return;
-    const imageId = Number(delBtn.dataset.imageId);
-    if (!imageId) return;
-    if (!state.editRemovedImageIds.includes(imageId)) state.editRemovedImageIds.push(imageId);
-    delBtn.closest(".thumb-card")?.remove();
+    const index = Number(delBtn.dataset.index);
+    const entry = state.editImageEntries[index];
+    if (!entry) return;
+    if (entry.kind === "existing" && entry.imageId && !state.editRemovedImageIds.includes(entry.imageId)) {
+      state.editRemovedImageIds.push(entry.imageId);
+    }
+    if (entry.kind === "new" && entry.previewUrl) {
+      URL.revokeObjectURL(entry.previewUrl);
+    }
+    state.editImageEntries.splice(index, 1);
+    renderEditImageEntries();
   };
+  bindLongPressSortable(
+    box,
+    () => state.editImageEntries,
+    (nextItems) => {
+      state.editImageEntries = nextItems;
+    },
+    renderEditImageEntries
+  );
+  bindImagePreview();
 }
 
 function openItemEditDialog(item) {
@@ -1729,8 +1978,17 @@ function openItemEditDialog(item) {
   renderEditItemTagChips();
 
   state.editRemovedImageIds = [];
-  renderEditCurrentImages(item);
   clearEditPendingFiles();
+  state.editImageEntries = [...(item.images || [])]
+    .sort((a, b) => (Number(a.display_order || 0) - Number(b.display_order || 0)) || (a.id - b.id))
+    .map((img) => ({
+      kind: "existing",
+      imageId: Number(img.id),
+      url: img.url,
+      previewUrl: img.url,
+      displayOrder: Number(img.display_order || 0),
+    }));
+  renderEditImageEntries();
   bindImagePreview();
   itemEditDialog.showModal();
 }
@@ -1741,7 +1999,6 @@ function clearItemForm() {
   form.elements.id.value = "";
   form.elements.quantity.value = "1";
   byId("cancelEditBtn").classList.add("hidden");
-  byId("editImages").innerHTML = "";
   clearPendingFiles();
   state.selectedItemTags = [];
   renderItemTagChips();
@@ -2141,4 +2398,179 @@ function clearAdminUserForm() {
   form.elements.role.value = "user";
   setAdminAvailableHouseIds([]);
   state.userInlineEdit = null;
+}
+
+function bindImagePreview() {
+  document.querySelectorAll(".thumb").forEach((node) => {
+    node.onclick = () => {
+      openImagePreview(node.dataset.fullUrl || node.src, node.alt || "图片预览");
+    };
+  });
+}
+
+function getEditExistingImageCount() {
+  return 0;
+}
+
+function renderPendingFiles() {
+  byId("selectedFilesCount").textContent = `已选 ${state.pendingFiles.length} 张新图片`;
+  const box = byId("pendingImagePreview");
+  box.innerHTML = state.pendingFiles
+    .map(
+      (it, i) => `<div class="thumb-card sortable-image-card" data-index="${i}" data-sort-key="${escapeHtml(getSortableCardKey(it, i))}">
+      <span class="image-order-badge">${getSortableBadgeLabel("pendingImagePreview", it, i)}</span>
+      <img class="thumb thumb-43" src="${it.previewUrl}" alt="待上传图片" draggable="false" />
+      <button class="thumb-delete" type="button" data-index="${i}" aria-label="删除图片"></button>
+    </div>`
+    )
+    .join("");
+  box.onclick = (e) => {
+    const btn = e.target.closest("button[data-index]");
+    if (!btn) return;
+    const index = Number(btn.dataset.index);
+    URL.revokeObjectURL(state.pendingFiles[index].previewUrl);
+    state.pendingFiles.splice(index, 1);
+    renderPendingFiles();
+  };
+  bindLongPressSortable(
+    box,
+    () => state.pendingFiles,
+    (nextItems) => {
+      state.pendingFiles = nextItems;
+    },
+    renderPendingFiles
+  );
+  bindImagePreview();
+}
+
+async function handleItemFileChange(e) {
+  const files = [...(e.target.files || [])];
+  const remain = MAX_IMAGES_PER_ITEM - getEditExistingImageCount() - state.pendingFiles.length;
+  if (remain <= 0) {
+    toast("图片最多 9 张");
+    e.target.value = "";
+    return;
+  }
+  const selected = files.slice(0, remain);
+  try {
+    const compressed = await compressFilesForUpload(selected);
+    compressed.forEach((f) =>
+      state.pendingFiles.push({
+        file: f,
+        fileKey: createFileKey("create"),
+        previewUrl: URL.createObjectURL(f),
+      })
+    );
+    if (files.length > remain) toast(`最多上传 ${MAX_IMAGES_PER_ITEM} 张图片，已忽略超出部分`);
+  } catch (err) {
+    toast(err.message || "图片压缩失败");
+  }
+  e.target.value = "";
+  renderPendingFiles();
+}
+
+function clearEditPendingFiles() {
+  state.editImageEntries
+    .filter((entry) => entry.kind === "new")
+    .forEach((entry) => URL.revokeObjectURL(entry.previewUrl));
+  state.editPendingFiles = [];
+  state.editImageEntries = [];
+  if (byId("itemEditFiles")) byId("itemEditFiles").value = "";
+  renderEditImageEntries();
+}
+
+async function handleEditItemFileChange(e) {
+  const files = [...(e.target.files || [])];
+  const remain = MAX_IMAGES_PER_ITEM - state.editImageEntries.length;
+  if (remain <= 0) {
+    toast("图片最多 9 张");
+    e.target.value = "";
+    return;
+  }
+  const selected = files.slice(0, remain);
+  try {
+    const compressed = await compressFilesForUpload(selected);
+    compressed.forEach((f) => {
+      const previewUrl = URL.createObjectURL(f);
+      state.editImageEntries.push({
+        kind: "new",
+        file: f,
+        fileKey: createFileKey("edit"),
+        previewUrl,
+        url: previewUrl,
+      });
+    });
+    if (files.length > remain) toast(`最多上传 ${MAX_IMAGES_PER_ITEM} 张图片，已忽略超出部分`);
+  } catch (err) {
+    toast(err.message || "图片压缩失败");
+  }
+  e.target.value = "";
+  renderEditImageEntries();
+}
+
+function openItemPhotosDialog(item) {
+  if (!itemPhotosDialog) return;
+  const box = byId("itemPhotosContent");
+  const list = [...(item.images || [])].sort((a, b) => (Number(a.display_order || 0) - Number(b.display_order || 0)) || (a.id - b.id));
+  if (!list.length) {
+    box.innerHTML = "<p>暂无照片</p>";
+  } else {
+    box.innerHTML = list
+      .map(
+        (img, index) => `<div class="photo-thumb-card">
+          <span class="image-order-badge">#${index + 1}</span>
+          <button type="button" class="photo-thumb-btn" data-full-url="${escapeHtml(img.url)}" data-alt="${escapeHtml(item.name || "图片")}">
+            <img class="thumb thumb-43" src="${img.url}" alt="${escapeHtml(item.name || "图片")}" data-full-url="${escapeHtml(img.url)}" draggable="false" />
+          </button>
+          <div class="photo-meta">上传时间：${escapeHtml(formatDateTime(img.created_at, true))}</div>
+        </div>`
+      )
+      .join("");
+    box.querySelectorAll(".photo-thumb-btn").forEach((btn) => {
+      const parentCard = btn.closest(".photo-thumb-card");
+      const timeText = parentCard?.querySelector(".photo-meta")?.textContent?.replace(/\s+/g, " ").trim() || "";
+      btn.onclick = () => openImagePreview(btn.dataset.fullUrl, btn.dataset.alt || "图片预览", `${btn.dataset.alt || "图片"} ${timeText}`);
+    });
+  }
+  itemPhotosDialog.showModal();
+}
+
+function renderEditImageEntries() {
+  const countEl = byId("itemEditFilesCount");
+  const box = byId("itemEditImageSorter");
+  if (!countEl || !box) return;
+  countEl.textContent = `当前共 ${state.editImageEntries.length} 张图片`;
+  box.innerHTML = state.editImageEntries
+    .map(
+      (entry, index) => `<div class="thumb-card sortable-image-card" data-index="${index}" data-sort-key="${escapeHtml(getSortableCardKey(entry, index))}">
+        <span class="image-order-badge">${getSortableBadgeLabel("itemEditImageSorter", entry, index)}</span>
+        <img class="thumb thumb-43" src="${entry.previewUrl || entry.url}" alt="${entry.kind === "existing" ? "现有图片" : "待上传图片"}" data-full-url="${entry.previewUrl || entry.url}" draggable="false" />
+        <button type="button" class="thumb-delete old-image-delete" data-index="${index}" aria-label="删除图片"></button>
+      </div>`
+    )
+    .join("");
+  box.onclick = (e) => {
+    const delBtn = e.target.closest(".old-image-delete[data-index]");
+    if (!delBtn) return;
+    const index = Number(delBtn.dataset.index);
+    const entry = state.editImageEntries[index];
+    if (!entry) return;
+    if (entry.kind === "existing" && entry.imageId && !state.editRemovedImageIds.includes(entry.imageId)) {
+      state.editRemovedImageIds.push(entry.imageId);
+    }
+    if (entry.kind === "new" && entry.previewUrl) {
+      URL.revokeObjectURL(entry.previewUrl);
+    }
+    state.editImageEntries.splice(index, 1);
+    renderEditImageEntries();
+  };
+  bindLongPressSortable(
+    box,
+    () => state.editImageEntries,
+    (nextItems) => {
+      state.editImageEntries = nextItems;
+    },
+    renderEditImageEntries
+  );
+  bindImagePreview();
 }
