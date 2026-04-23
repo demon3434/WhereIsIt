@@ -102,14 +102,7 @@ class ItemImageOut(BaseModel):
     id: int
     filename: str
     url: str
-    display_order: int
     created_at: datetime
-
-
-class ItemImageOrderIn(BaseModel):
-    image_id: int | None = None
-    file_key: str | None = None
-    display_order: int = Field(ge=1)
 
 
 class ItemIn(BaseModel):
@@ -122,7 +115,6 @@ class ItemIn(BaseModel):
     room_id: int
     tag_ids: list[int] = []
     tag_names: list[str] = []
-    image_orders: list[ItemImageOrderIn] = []
 
 
 class ItemOut(BaseModel):

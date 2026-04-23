@@ -123,11 +123,7 @@ class Item(Base):
     owner: Mapped["User"] = relationship(back_populates="items")
     category: Mapped["Category | None"] = relationship(back_populates="items")
     location: Mapped["Location | None"] = relationship(back_populates="items")
-    images: Mapped[list["ItemImage"]] = relationship(
-        back_populates="item",
-        cascade="all, delete-orphan",
-        order_by=lambda: (ItemImage.display_order.asc(), ItemImage.id.asc()),
-    )
+    images: Mapped[list["ItemImage"]] = relationship(back_populates="item", cascade="all, delete-orphan")
     tags: Mapped[list["Tag"]] = relationship(secondary=item_tags, back_populates="items")
 
 
@@ -138,7 +134,6 @@ class ItemImage(Base):
     item_id: Mapped[int] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), index=True)
     filename: Mapped[str] = mapped_column(String(255))
     url: Mapped[str] = mapped_column(String(300))
-    display_order: Mapped[int] = mapped_column(Integer, default=1)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     item: Mapped["Item"] = relationship(back_populates="images")

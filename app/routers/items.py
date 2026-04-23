@@ -18,10 +18,6 @@ from ..services.voice_search import delete_item_voice_terms, mark_item_voice_ter
 router = APIRouter(prefix="/api/items", tags=["物品"])
 
 
-def sort_item_images(images: list[ItemImage]) -> list[ItemImage]:
-    return sorted(images, key=lambda image: (image.display_order or 0, image.id or 0))
-
-
 def check_refs(db: Session, current_user: User, category_id: int, house_id: int, room_id: int) -> tuple[Category, Location]:
     category = db.get(Category, category_id)
     if not category:
@@ -110,7 +106,7 @@ def item_to_out(item: Item) -> ItemOut:
         house_id=item.location.house_id if item.location else None,
         house_name=house_name,
         tags=item.tags,
-        images=sort_item_images(list(item.images or [])),
+        images=item.images,
         owner_user_id=item.user_id,
         owner_username=item.owner.username if item.owner else "",
         owner_display_name=owner_display_name,
@@ -130,66 +126,6 @@ def query_base(current_user: User) -> Select[tuple[Item]]:
         selectinload(Item.location),
         selectinload(Item.owner),
     ).order_by(Item.updated_at.desc())
-
-
-def build_image_order_map(
-    *,
-    payload: ItemIn,
-    item: Item | None,
-    files: list[UploadFile],
-    file_keys: list[str],
-) -> tuple[dict[int, int], dict[str, int]]:
-    if files and len(file_keys) != len(files):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序参数不完整")
-    if len(set(file_keys)) != len(file_keys):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序参数中有重复文件标识")
-
-    existing_images = sort_item_images(list(item.images or [])) if item else []
-    existing_ids = {image.id for image in existing_images}
-    file_key_set = set(file_keys)
-
-    if not payload.image_orders:
-        existing_order_map = {image.id: index for index, image in enumerate(existing_images, start=1)}
-        next_order = len(existing_order_map) + 1
-        new_file_order_map: dict[str, int] = {}
-        for file_key in file_keys:
-            new_file_order_map[file_key] = next_order
-            next_order += 1
-        return existing_order_map, new_file_order_map
-
-    ordered_entries = sorted(payload.image_orders, key=lambda entry: entry.display_order)
-    normalized_existing: dict[int, int] = {}
-    normalized_new: dict[str, int] = {}
-    seen_existing_ids: set[int] = set()
-    seen_file_keys: set[str] = set()
-
-    for expected_order, entry in enumerate(ordered_entries, start=1):
-        entry_existing_id = entry.image_id
-        entry_file_key = (entry.file_key or "").strip()
-        if bool(entry_existing_id) == bool(entry_file_key):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序配置无效")
-        if entry.display_order != expected_order:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片展示序号必须从 1 开始连续递增")
-        if entry_existing_id:
-            if entry_existing_id not in existing_ids:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序中包含无效的现有图片")
-            if entry_existing_id in seen_existing_ids:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序中包含重复的现有图片")
-            seen_existing_ids.add(entry_existing_id)
-            normalized_existing[entry_existing_id] = expected_order
-            continue
-        if entry_file_key not in file_key_set:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序中包含无效的新图片")
-        if entry_file_key in seen_file_keys:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序中包含重复的新图片")
-        seen_file_keys.add(entry_file_key)
-        normalized_new[entry_file_key] = expected_order
-
-    if seen_existing_ids != existing_ids:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序缺少现有图片")
-    if seen_file_keys != file_key_set:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="图片顺序缺少新上传图片")
-    return normalized_existing, normalized_new
 
 
 @router.get("", response_model=PaginatedItemsOut)
@@ -281,7 +217,6 @@ def list_items(
 def create_item(
     data: str = Form(...),
     files: list[UploadFile] = File(default=[]),
-    file_keys: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -309,18 +244,9 @@ def create_item(
     db.flush()
     mark_item_voice_terms_dirty(item)
 
-    _, new_file_order_map = build_image_order_map(payload=payload, item=None, files=files, file_keys=file_keys)
-    for file_key, upload in zip(file_keys, files):
-        filename, url = save_upload_file(upload, current_user.id, item.id)
-        db.add(
-            ItemImage(
-                item=item,
-                filename=filename,
-                url=url,
-                display_order=new_file_order_map[file_key],
-                created_at=now,
-            )
-        )
+    for f in files:
+        filename, url = save_upload_file(f, current_user.id, item.id)
+        db.add(ItemImage(item=item, filename=filename, url=url))
 
     db.add(OperationLog(owner=current_user, action="create_item", details=item.name))
     db.commit()
@@ -333,7 +259,6 @@ def update_item(
     item_id: int,
     data: str = Form(...),
     files: list[UploadFile] = File(default=[]),
-    file_keys: list[str] = Form(default=[]),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -358,23 +283,9 @@ def update_item(
     db.flush()
     mark_item_voice_terms_dirty(item)
 
-    existing_order_map, new_file_order_map = build_image_order_map(payload=payload, item=item, files=files, file_keys=file_keys)
-    now = datetime.utcnow()
-    for image in item.images:
-        if image.id in existing_order_map:
-            image.display_order = existing_order_map[image.id]
-
-    for file_key, upload in zip(file_keys, files):
-        filename, url = save_upload_file(upload, current_user.id, item.id)
-        db.add(
-            ItemImage(
-                item=item,
-                filename=filename,
-                url=url,
-                display_order=new_file_order_map[file_key],
-                created_at=now,
-            )
-        )
+    for f in files:
+        filename, url = save_upload_file(f, current_user.id, item.id)
+        db.add(ItemImage(item=item, filename=filename, url=url))
 
     db.add(OperationLog(owner=current_user, action="update_item", details=item.name))
     db.commit()
@@ -410,8 +321,5 @@ def delete_item_image(item_id: int, image_id: int, db: Session = Depends(get_db)
     if file_path.exists():
         file_path.unlink(missing_ok=True)
     db.delete(target)
-    remaining_images = [image for image in item.images if image.id != image_id]
-    for index, image in enumerate(sort_item_images(remaining_images), start=1):
-        image.display_order = index
     db.commit()
     return MessageOut(message="图片已删除")

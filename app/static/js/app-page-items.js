@@ -129,10 +129,6 @@ byId("itemForm").onsubmit = async (e) => {
       location_detail: fd.get("location_detail") || "",
       tag_ids: state.selectedItemTags.filter((x) => x.id).map((x) => Number(x.id)),
       tag_names: state.selectedItemTags.filter((x) => !x.id).map((x) => x.name),
-      image_orders: state.pendingFiles.map((it, index) => ({
-        file_key: it.fileKey,
-        display_order: index + 1,
-      })),
     };
 
     const duplicate = state.items.find(
@@ -149,10 +145,7 @@ byId("itemForm").onsubmit = async (e) => {
 
     const body = new FormData();
     body.append("data", JSON.stringify(payload));
-    state.pendingFiles.forEach((it) => {
-      body.append("files", it.file);
-      body.append("file_keys", it.fileKey);
-    });
+    state.pendingFiles.forEach((it) => body.append("files", it.file));
     if (itemId) await api(`/api/items/${itemId}`, { method: "PUT", body });
     else await api("/api/items", { method: "POST", body });
 
@@ -191,21 +184,11 @@ if (byId("itemEditForm")) {
         location_detail: fd.get("location_detail") || "",
         tag_ids: state.selectedEditItemTags.filter((x) => x.id).map((x) => Number(x.id)),
         tag_names: state.selectedEditItemTags.filter((x) => !x.id).map((x) => x.name),
-        image_orders: state.editImageEntries.map((entry, index) => ({
-          image_id: entry.kind === "existing" ? Number(entry.imageId) : null,
-          file_key: entry.kind === "new" ? entry.fileKey : null,
-          display_order: index + 1,
-        })),
       };
 
       const body = new FormData();
       body.append("data", JSON.stringify(payload));
-      state.editImageEntries
-        .filter((entry) => entry.kind === "new")
-        .forEach((entry) => {
-          body.append("files", entry.file);
-          body.append("file_keys", entry.fileKey);
-        });
+      state.editPendingFiles.forEach((it) => body.append("files", it.file));
       for (const imageId of state.editRemovedImageIds) {
         await api(`/api/items/${id}/images/${imageId}`, { method: "DELETE" });
       }
@@ -220,3 +203,4 @@ if (byId("itemEditForm")) {
     }
   };
 }
+

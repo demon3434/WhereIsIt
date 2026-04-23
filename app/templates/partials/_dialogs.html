@@ -67,8 +67,9 @@
             <input type="file" id="itemEditFiles" name="files" accept="image/*,.jpg,.jpeg,.png" multiple />
           </label>
         </div>
-        <div id="itemEditFilesCount" class="file-count">当前共 0 张图片</div>
-        <div id="itemEditImageSorter" class="image-grid"></div>
+        <div id="itemEditFilesCount" class="file-count">已选 0 张新图片</div>
+        <div id="itemEditPendingPreview" class="image-grid"></div>
+        <div id="itemEditCurrentImages" class="image-row"></div>
 
         <div class="confirm-actions">
           <button id="itemEditCancelBtn" type="button" class="ghost">取消</button>
@@ -82,12 +83,12 @@
     <div class="image-preview-shell">
       <div class="image-preview-toolbar">
         <div class="image-preview-tools">
-          <button type="button" id="imageZoomOutBtn" class="image-tool-btn image-tool-icon" title="缩小" aria-label="缩小">－</button>
+          <button type="button" id="imageZoomOutBtn" class="image-tool-btn image-tool-icon" title="缩小" aria-label="缩小">🔍−</button>
           <button type="button" id="imageZoomResetBtn" class="image-tool-btn image-tool-icon" title="恢复" aria-label="恢复">↺</button>
-          <button type="button" id="imageZoomInBtn" class="image-tool-btn image-tool-icon" title="放大" aria-label="放大">＋</button>
+          <button type="button" id="imageZoomInBtn" class="image-tool-btn image-tool-icon" title="放大" aria-label="放大">🔍＋</button>
         </div>
         <div id="imagePreviewTitle" class="image-preview-title">图片预览</div>
-        <button type="button" id="imagePreviewCloseBtn" class="image-close-btn" aria-label="关闭">×</button>
+        <button type="button" id="imagePreviewCloseBtn" class="image-close-btn" aria-label="关闭">✕</button>
       </div>
       <div id="imagePreviewStage" class="image-preview-stage">
         <img id="imagePreviewImg" alt="图片预览" />
