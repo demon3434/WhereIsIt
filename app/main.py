@@ -11,13 +11,14 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from sqlalchemy import func, select, text
+from sqlalchemy import func, inspect, select, text
+from sqlalchemy.orm import Session, selectinload
 
 from .auth import hash_password
 from .config import settings
 from .database import Base, SessionLocal, engine
 from .deps import get_current_user_optional
-from .models import House, Item, User, VoiceSearchTerm
+from .models import House, Item, ItemImage, User, VoiceSearchTerm
 from .routers import admin_users, auth, categories, data_management, gui_backup, houses, items, rooms, tags, users, voice_search
 from .services.mdns import ServiceDiscoveryBroadcaster
 from .services.storage import ensure_upload_dir
@@ -143,12 +144,16 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 
 @app.on_event("startup")
 async def on_startup():
+    schema_already_exists = has_existing_schema()
     Base.metadata.create_all(bind=engine)
-    run_postgres_migrations()
+    if schema_already_exists:
+        run_schema_migrations()
     ensure_upload_dir()
     ensure_voice_cleaning_lexicon_files()
     db = SessionLocal()
     try:
+        if schema_already_exists:
+            normalize_item_image_orders(db)
         exists = db.scalar(select(User).where(User.username == settings.default_admin_username))
         if not exists:
             exists = User(
@@ -292,6 +297,33 @@ def health():
     return {"status": "ok"}
 
 
+def has_existing_schema() -> bool:
+    inspector = inspect(engine)
+    try:
+        existing_tables = set(inspector.get_table_names())
+    except Exception:
+        return False
+    app_tables = set(Base.metadata.tables.keys())
+    return bool(existing_tables & app_tables)
+
+
+def run_schema_migrations() -> None:
+    dialect = engine.dialect.name
+    if dialect == "postgresql":
+        run_postgres_migrations()
+        return
+    run_sqlite_like_migrations()
+
+
+def run_sqlite_like_migrations() -> None:
+    with engine.begin() as conn:
+        columns = {row[1] for row in conn.execute(text("PRAGMA table_info(item_images)")).fetchall()}
+        if "display_order" not in columns:
+            conn.execute(text("ALTER TABLE item_images ADD COLUMN display_order INTEGER NOT NULL DEFAULT 1"))
+        if "updated_at" in columns:
+            conn.execute(text("ALTER TABLE item_images DROP COLUMN updated_at"))
+
+
 def run_postgres_migrations() -> None:
     statements = [
         "CREATE TABLE IF NOT EXISTS houses (id SERIAL PRIMARY KEY, name VARCHAR(80) UNIQUE NOT NULL, is_active BOOLEAN NOT NULL DEFAULT TRUE, created_at TIMESTAMP NOT NULL DEFAULT NOW())",
@@ -326,6 +358,8 @@ END $$""",
         "ALTER TABLE IF EXISTS items DROP COLUMN IF EXISTS purchase_date",
         "ALTER TABLE IF EXISTS items DROP COLUMN IF EXISTS price",
         "ALTER TABLE IF EXISTS item_images ADD COLUMN IF NOT EXISTS created_at TIMESTAMP NOT NULL DEFAULT NOW()",
+        "ALTER TABLE IF EXISTS item_images ADD COLUMN IF NOT EXISTS display_order INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE IF EXISTS item_images DROP COLUMN IF EXISTS updated_at",
         """CREATE TABLE IF NOT EXISTS voice_search_terms (
           id SERIAL PRIMARY KEY,
           user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -370,3 +404,27 @@ END $$""",
     with engine.begin() as conn:
         for stmt in statements:
             conn.execute(text(stmt))
+
+
+def normalize_item_image_orders(db: Session) -> None:
+    items = list(db.scalars(select(Item).options(selectinload(Item.images))))
+    for item in items:
+        current_images = list(item.images or [])
+        images = sorted(
+            current_images,
+            key=lambda image: (
+                image.created_at or datetime.min,
+                image.id or 0,
+            ),
+        )
+        if not images:
+            continue
+        existing_orders = [int(image.display_order or 0) for image in current_images]
+        needs_resequence = sorted(existing_orders) != list(range(1, len(current_images) + 1))
+        changed = False
+        for index, image in enumerate(images, start=1):
+            if needs_resequence and image.display_order != index:
+                image.display_order = index
+                changed = True
+        if changed:
+            item.updated_at = max((img.created_at or datetime.utcnow()) for img in images)
